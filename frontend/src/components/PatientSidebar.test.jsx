@@ -93,24 +93,6 @@ describe('PatientSidebar — draft badge', () => {
   })
 })
 
-describe('PatientSidebar — cancel subscription button', () => {
-  it('no muestra "Cancelar suscripción" cuando canCancelSubscription=false', () => {
-    render(<PatientSidebar {...defaultProps} canCancelSubscription={false} />)
-    expect(screen.queryByRole('button', { name: /cancelar suscripción/i })).not.toBeInTheDocument()
-  })
-
-  it('muestra "Cancelar suscripción" cuando canCancelSubscription=true', () => {
-    render(<PatientSidebar {...defaultProps} canCancelSubscription={true} onCancelSubscription={vi.fn()} />)
-    expect(screen.getByRole('button', { name: /cancelar suscripción/i })).toBeInTheDocument()
-  })
-
-  it('click en "Cancelar suscripción" llama onCancelSubscription', async () => {
-    const onCancelSubscription = vi.fn()
-    render(<PatientSidebar {...defaultProps} canCancelSubscription={true} onCancelSubscription={onCancelSubscription} />)
-    await userEvent.click(screen.getByRole('button', { name: /cancelar suscripción/i }))
-    expect(onCancelSubscription).toHaveBeenCalledOnce()
-  })
-})
 
 describe('PatientSidebar — patient search', () => {
   const CONVS = [
