@@ -156,6 +156,21 @@ export function toggleExpandedSession(currentId, clickedId) {
   return currentId === clickedId ? null : clickedId;
 }
 
+// Pure filter for the Historial session list. Exported for unit testing.
+// Searches simultaneously: session display number, formatted date, raw_dictation.
+// Security: uses .includes() (no RegExp), guards null dictation with ?? '',
+// bypasses filter on whitespace-only query via .trim().
+export function filterHistorialSessions(sessions, query, displayNumMap) {
+  if (query.trim() === '') return sessions;
+  const q = query.toLowerCase();
+  return sessions.filter(s => {
+    const num = String(displayNumMap.get(String(s.id)) ?? '');
+    const date = formatDate(s.session_date).toLowerCase();
+    const dictation = (s.raw_dictation ?? '').toLowerCase();
+    return num.includes(q) || date.includes(q) || dictation.includes(q);
+  });
+}
+
 function App() {
   // Estado de pantalla
   const [authScreen, setAuthScreen] = useState(() => getScreenFromUrl());
