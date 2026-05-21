@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { markPendingNotesReadOnly } from './App'
+import { markPendingNotesReadOnly, filterHistorialSessions } from './App'
 
 // Refleja la lógica de loadPatientChat — se testea sin montar el componente completo
 function buildChatMessages(sessions) {
@@ -277,3 +277,56 @@ describe('currentSessionNote shapes', () => {
     expect(note).toBeNull();
   });
 });
+
+describe('filterHistorialSessions', () => {
+  const DISPLAY_MAP = new Map([
+    ['s1', 1],
+    ['s2', 2],
+    ['s3', 3],
+  ])
+
+  const SESSIONS = [
+    { id: 's1', session_date: '2026-01-15T12:00:00', raw_dictation: 'Paciente con ansiedad elevada.' },
+    { id: 's2', session_date: '2026-01-08T12:00:00', raw_dictation: 'Llegó tarde, menciona conflicto familiar.' },
+    { id: 's3', session_date: '2026-02-05T12:00:00', raw_dictation: null },
+  ]
+
+  it('empty query returns all sessions', () => {
+    expect(filterHistorialSessions(SESSIONS, '', DISPLAY_MAP)).toHaveLength(3)
+  })
+
+  it('whitespace-only query returns all sessions', () => {
+    expect(filterHistorialSessions(SESSIONS, '   ', DISPLAY_MAP)).toHaveLength(3)
+  })
+
+  it('filters by session display number', () => {
+    const result = filterHistorialSessions(SESSIONS, '3', DISPLAY_MAP)
+    expect(result).toHaveLength(1)
+    expect(result[0].id).toBe('s3')
+  })
+
+  it('filters by partial date string (case-insensitive)', () => {
+    const result = filterHistorialSessions(SESSIONS, 'ene', DISPLAY_MAP)
+    expect(result).toHaveLength(2)
+    expect(result.map(s => s.id)).toEqual(['s1', 's2'])
+  })
+
+  it('filters by keyword in raw_dictation (case-insensitive)', () => {
+    const result = filterHistorialSessions(SESSIONS, 'ANSIEDAD', DISPLAY_MAP)
+    expect(result).toHaveLength(1)
+    expect(result[0].id).toBe('s1')
+  })
+
+  it('returns empty array when nothing matches', () => {
+    expect(filterHistorialSessions(SESSIONS, 'xyz_no_match', DISPLAY_MAP)).toHaveLength(0)
+  })
+
+  it('does not throw when raw_dictation is null', () => {
+    expect(() => filterHistorialSessions(SESSIONS, 'algo', DISPLAY_MAP)).not.toThrow()
+  })
+
+  it('session with null raw_dictation is still matched by number', () => {
+    const result = filterHistorialSessions(SESSIONS, '3', DISPLAY_MAP)
+    expect(result[0].id).toBe('s3')
+  })
+})

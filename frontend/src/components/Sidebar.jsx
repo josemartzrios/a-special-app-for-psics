@@ -1,6 +1,18 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 
 export default function Sidebar({ open, onClose, conversations, onSelectConversation, onDeleteConversation, onLogout, draftPatientIds = new Set(), canCancelSubscription = false, onCancelSubscription }) {
+  const [searchQuery, setSearchQuery] = useState('');
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) setSearchQuery('');
+  }, [open]);
+
+  const normalize = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const filteredConversations = conversations.filter(c =>
+    normalize(c.patient_name).includes(normalize(searchQuery))
+  );
+
   return (
     <>
       {open && (
@@ -29,10 +41,37 @@ export default function Sidebar({ open, onClose, conversations, onSelectConversa
           </button>
         </div>
 
+        {/* Search input — replaces the previous "N sesiones" count row */}
         <div className="px-5 py-2 border-b border-ink/[0.05] flex-shrink-0">
-          <span className="text-[10px] text-ink-tertiary font-bold uppercase tracking-[0.12em]">
-            {conversations.length} {conversations.length === 1 ? 'sesión' : 'sesiones'}
-          </span>
+          <div className="relative flex items-center">
+            <input
+              ref={inputRef}
+              type="text"
+              placeholder="Buscar paciente..."
+              maxLength={100}
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Escape') {
+                  if (searchQuery) {
+                    setSearchQuery('');
+                  } else {
+                    e.currentTarget.blur();
+                  }
+                }
+              }}
+              className="w-full bg-white border border-black/[0.1] rounded-lg px-3 py-1.5 text-sm text-[#18181b] placeholder:text-ink-tertiary focus:outline-none focus:border-[#5a9e8a]/60 transition-colors pr-7"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => { setSearchQuery(''); inputRef.current?.focus(); }}
+                aria-label="Limpiar búsqueda"
+                className="absolute right-2 text-ink-tertiary hover:text-ink p-0.5 rounded transition-colors"
+              >
+                ×
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto">
@@ -45,8 +84,12 @@ export default function Sidebar({ open, onClose, conversations, onSelectConversa
               </div>
               <p className="text-ink-tertiary text-sm">Sin sesiones registradas</p>
             </div>
+          ) : filteredConversations.length === 0 ? (
+            <div className="px-4 py-6 text-center">
+              <p className="text-ink-tertiary text-[13px]">Sin resultados</p>
+            </div>
           ) : (
-            conversations.map(conv => (
+            filteredConversations.map(conv => (
               <ConversationItem
                 key={conv.patient_id}
                 conv={conv}

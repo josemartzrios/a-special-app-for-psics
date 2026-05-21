@@ -111,3 +111,58 @@ describe('PatientSidebar — cancel subscription button', () => {
     expect(onCancelSubscription).toHaveBeenCalledOnce()
   })
 })
+
+describe('PatientSidebar — patient search', () => {
+  const CONVS = [
+    { patient_id: 'p1', patient_name: 'María García', session_number: 1, status: 'confirmed', dictation_preview: null },
+    { patient_id: 'p2', patient_name: 'Carlos Ruiz',  session_number: 2, status: 'confirmed', dictation_preview: null },
+    { patient_id: 'p3', patient_name: 'Ana López',    session_number: 1, status: 'confirmed', dictation_preview: null },
+  ]
+
+  it('renders search input', () => {
+    render(<PatientSidebar {...defaultProps} conversations={CONVS} />)
+    expect(screen.getByPlaceholderText(/buscar paciente/i)).toBeInTheDocument()
+  })
+
+  it('filters patients by name case-insensitively', async () => {
+    render(<PatientSidebar {...defaultProps} conversations={CONVS} />)
+    await userEvent.type(screen.getByPlaceholderText(/buscar paciente/i), 'garcia')
+    expect(screen.getByText('María García')).toBeInTheDocument()
+    expect(screen.queryByText('Carlos Ruiz')).not.toBeInTheDocument()
+    expect(screen.queryByText('Ana López')).not.toBeInTheDocument()
+  })
+
+  it('shows "Sin resultados" when no patients match the query', async () => {
+    render(<PatientSidebar {...defaultProps} conversations={CONVS} />)
+    await userEvent.type(screen.getByPlaceholderText(/buscar paciente/i), 'xyz')
+    expect(screen.getByText(/sin resultados/i)).toBeInTheDocument()
+  })
+
+  it('clear button is hidden when query is empty', () => {
+    render(<PatientSidebar {...defaultProps} conversations={CONVS} />)
+    expect(screen.queryByRole('button', { name: /limpiar búsqueda/i })).not.toBeInTheDocument()
+  })
+
+  it('clear button appears when query is non-empty', async () => {
+    render(<PatientSidebar {...defaultProps} conversations={CONVS} />)
+    await userEvent.type(screen.getByPlaceholderText(/buscar paciente/i), 'g')
+    expect(screen.getByRole('button', { name: /limpiar búsqueda/i })).toBeInTheDocument()
+  })
+
+  it('clear button click resets query and returns focus to input', async () => {
+    render(<PatientSidebar {...defaultProps} conversations={CONVS} />)
+    const input = screen.getByPlaceholderText(/buscar paciente/i)
+    await userEvent.type(input, 'garcia')
+    await userEvent.click(screen.getByRole('button', { name: /limpiar búsqueda/i }))
+    expect(input).toHaveValue('')
+    expect(input).toHaveFocus()
+  })
+
+  it('Escape clears the query when non-empty', async () => {
+    render(<PatientSidebar {...defaultProps} conversations={CONVS} />)
+    const input = screen.getByPlaceholderText(/buscar paciente/i)
+    await userEvent.type(input, 'garcia')
+    await userEvent.keyboard('{Escape}')
+    expect(input).toHaveValue('')
+  })
+})
