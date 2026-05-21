@@ -38,7 +38,7 @@ export default function PatientHeader({
   if (!patientName) {
     return (
       <header className="px-6 py-3.5 border-b border-black/[0.07] bg-white flex items-center justify-between gap-3 flex-shrink-0 min-h-[52px]">
-        <span className="text-ink-tertiary text-[14px]">Selecciona un paciente</span>
+        <span className="text-ink-tertiary text-[14px]"></span>
         {tutorialButton}
       </header>
     );

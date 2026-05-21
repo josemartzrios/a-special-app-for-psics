@@ -93,9 +93,7 @@ export default function PatientSummarySection({ sessionId, patientName }) {
         <div className="bg-[#f4faf8] border border-[#5a9e8a] rounded-xl px-3 py-3">
           <div className="flex flex-col items-center text-center gap-0.5">
             <div className="flex items-center gap-2">
-              <svg className="w-4 h-4 text-[#5a9e8a] flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
-              </svg>
+              
               <p className="text-[13px] font-semibold text-[#5a9e8a]">Seguimiento enviado a {firstName}</p>
             </div>
             {hourStr && <p className="text-[11px] text-[#9ca3af]">Hoy · {hourStr}</p>}
