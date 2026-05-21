@@ -202,6 +202,11 @@ function App() {
   const [desktopMode, setDesktopMode] = useState('session'); // 'session' | 'review'
   const [reviewExpandedSessionId, setReviewExpandedSessionId] = useState(null);
 
+  // Historial session search
+  const [historialSearchQuery, setHistorialSearchQuery] = useState('');
+  const historialSearchDesktopRef = useRef(null);
+  const historialSearchMobileRef  = useRef(null);
+
   // Template state
   const [template, setTemplate] = useState(null);
   const [onboardingCompleted, setOnboardingCompleted] = useState(() => localStorage.getItem('syquex_onboarding_done') === 'true');
@@ -613,6 +618,7 @@ function App() {
 
   // Clear "Nueva" badge when patient changes
   useEffect(() => { setNewlyConfirmedSessionId(null); setDismissedOrphanIds(new Set()); }, [selectedPatientId]);
+  useEffect(() => { setHistorialSearchQuery(''); }, [selectedPatientId]);
 
   const handleSendDictation = async (dictation) => {
     const activeFormat = noteFormat;
@@ -736,6 +742,12 @@ function App() {
   // oldest-first from the backend (asc), so index 0 = oldest → gets number 1.
   const confirmedDisplayNum = new Map(
     confirmedSessions.map((s, i) => [String(s.id), i + 1])
+  );
+
+  const filteredHistorialSessions = filterHistorialSessions(
+    confirmedSessions,
+    historialSearchQuery,
+    confirmedDisplayNum
   );
 
   // Derive the latest note message for the note panel
