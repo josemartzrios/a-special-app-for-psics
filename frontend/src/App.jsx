@@ -1130,6 +1130,40 @@ function App() {
                     {/* Left: Historial (380px wide in Review mode) */}
                     <div className="w-[380px] flex-shrink-0 flex flex-col border-r border-black/[0.07] bg-[#f4f4f2] overflow-y-auto px-5 py-6">
                       <p className="text-[10px] font-bold uppercase tracking-[0.10em] text-ink-muted mb-4 px-2">Historial de Notas</p>
+
+                      {/* Session search input */}
+                      <div className="px-2 mb-3">
+                        <div className="relative flex items-center">
+                          <input
+                            ref={historialSearchDesktopRef}
+                            type="text"
+                            placeholder="Buscar por sesión, fecha o palabra..."
+                            maxLength={80}
+                            value={historialSearchQuery}
+                            onChange={e => setHistorialSearchQuery(e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === 'Escape') {
+                                if (historialSearchQuery) {
+                                  setHistorialSearchQuery('');
+                                } else {
+                                  e.currentTarget.blur();
+                                }
+                              }
+                            }}
+                            className="w-full bg-white border border-black/[0.1] rounded-lg px-3 py-1.5 text-sm text-[#18181b] placeholder:text-ink-tertiary focus:outline-none focus:border-[#5a9e8a]/60 transition-colors pr-7"
+                          />
+                          {historialSearchQuery && (
+                            <button
+                              onClick={() => { setHistorialSearchQuery(''); historialSearchDesktopRef.current?.focus(); }}
+                              aria-label="Limpiar búsqueda"
+                              className="absolute right-2 text-ink-tertiary hover:text-ink p-0.5 rounded transition-colors"
+                            >
+                              ×
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
                       <div className="space-y-3">
                         {sessionsLoading ? (
                           <div className="flex flex-col items-center gap-2 py-8">
@@ -1138,8 +1172,10 @@ function App() {
                           </div>
                         ) : confirmedSessions.length === 0 ? (
                           <p className="text-ink-tertiary text-xs px-2 italic">Sin notas SOAP confirmadas.</p>
+                        ) : filteredHistorialSessions.length === 0 ? (
+                          <p className="text-ink-tertiary text-[13px] text-center py-6">Sin resultados</p>
                         ) : (
-                          confirmedSessions.map((s, i) => {
+                          filteredHistorialSessions.map((s, i) => {
                             const isExpanded = reviewExpandedSessionId === String(s.id);
                             const isCustom = s.format === 'custom';
                             const hasNote = s.status === 'confirmed' && (
