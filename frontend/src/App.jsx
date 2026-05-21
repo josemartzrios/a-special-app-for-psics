@@ -1454,12 +1454,50 @@ function App() {
 
               {/* Tab: Historial */}
               {mobileTab === 'historial' && (
-                <div className="flex-1 overflow-y-auto px-4 py-4">
-                  {confirmedSessions.length === 0 ? (
-                    <p className="text-ink-tertiary text-[14px] text-center mt-10">Sin sesiones registradas aún.</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {confirmedSessions.map((s, i) => {
+                <div className="flex-1 flex flex-col min-h-0">
+
+                  {/* Sticky search bar */}
+                  <div className="px-4 py-2 border-b border-ink/[0.05] flex-shrink-0 bg-white">
+                    <div className="relative flex items-center">
+                      <input
+                        ref={historialSearchMobileRef}
+                        type="text"
+                        placeholder="Buscar por sesión, fecha o palabra..."
+                        maxLength={80}
+                        value={historialSearchQuery}
+                        onChange={e => setHistorialSearchQuery(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Escape') {
+                            if (historialSearchQuery) {
+                              setHistorialSearchQuery('');
+                            } else {
+                              e.currentTarget.blur();
+                            }
+                          }
+                        }}
+                        className="w-full bg-white border border-black/[0.1] rounded-lg px-3 py-1.5 text-sm text-[#18181b] placeholder:text-ink-tertiary focus:outline-none focus:border-[#5a9e8a]/60 transition-colors pr-7"
+                      />
+                      {historialSearchQuery && (
+                        <button
+                          onClick={() => { setHistorialSearchQuery(''); historialSearchMobileRef.current?.focus(); }}
+                          aria-label="Limpiar búsqueda"
+                          className="absolute right-2 text-ink-tertiary hover:text-ink p-0.5 rounded transition-colors"
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Scrollable session list */}
+                  <div className="flex-1 overflow-y-auto px-4 py-4">
+                    {confirmedSessions.length === 0 ? (
+                      <p className="text-ink-tertiary text-[14px] text-center mt-10">Sin sesiones registradas aún.</p>
+                    ) : filteredHistorialSessions.length === 0 ? (
+                      <p className="text-ink-tertiary text-[13px] text-center py-6">Sin resultados</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {filteredHistorialSessions.map((s, i) => {
                         const isExpanded = expandedSessionId === String(s.id);
                         const isCustom = s.format === 'custom';
                         const hasNote = s.status === 'confirmed' && (
@@ -1533,6 +1571,7 @@ function App() {
                       })}
                     </div>
                   )}
+                  </div>
                 </div>
               )}
 
