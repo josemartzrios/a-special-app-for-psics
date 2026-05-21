@@ -151,24 +151,6 @@ export default function PatientSidebar({
         </span>
       </div>
 
-      {/* Section Label: Pacientes + New button */}
-      <div className="px-3 pt-3 pb-1 flex-shrink-0 flex items-center justify-between px-5">
-        <span className="text-[10px] uppercase tracking-[0.12em] text-ink-tertiary font-bold px-2">
-          Pacientes
-        </span>
-        {!isCreatingPatient && (
-          <button
-            onClick={onNewPatient}
-            title="Nuevo paciente"
-            className="p-1 rounded-md text-ink-tertiary hover:text-[#5a9e8a] hover:bg-black/[0.04] transition-colors"
-          >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" />
-            </svg>
-          </button>
-        )}
-      </div>
-
       {/* Search input */}
       <div className="px-3 pb-2 flex-shrink-0">
         <div className="relative flex items-center">
@@ -188,7 +170,7 @@ export default function PatientSidebar({
                 }
               }
             }}
-            className="w-full bg-white border border-black/[0.1] rounded-lg px-3 py-1.5 text-sm text-[#18181b] placeholder:text-ink-tertiary focus:outline-none focus:border-[#5a9e8a]/60 transition-colors pr-7"
+            className="mt-4 w-full bg-white border border-black/[0.1] rounded-lg px-3 py-1.5 text-sm text-[#18181b] placeholder:text-ink-tertiary focus:outline-none focus:border-[#5a9e8a]/60 transition-colors pr-7"
           />
           {searchQuery && (
             <button
@@ -200,6 +182,25 @@ export default function PatientSidebar({
             </button>
           )}
         </div>
+      </div>
+
+
+       {/* Section Label: Pacientes + New button */}
+      <div className="px-3 pt-3 pb-1 flex-shrink-0 flex items-center justify-between px-5">
+        <span className="text-[10px] uppercase tracking-[0.12em] text-ink-tertiary font-bold px-2">
+          Pacientes
+        </span>
+        {!isCreatingPatient && (
+          <button
+            onClick={onNewPatient}
+            title="Nuevo paciente"
+            className="p-1 rounded-md text-ink-tertiary hover:text-[#5a9e8a] hover:bg-black/[0.04] transition-colors"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" />
+            </svg>
+          </button>
+        )}
       </div>
 
       {/* Inline creation form — shown directly below label when isCreatingPatient */}

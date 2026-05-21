@@ -67,9 +67,9 @@ Search input appears between the `HISTORIAL DE NOTAS` label and the session list
 ┌──────────────────────────────────────────┐
 │  HISTORIAL DE NOTAS                      │
 │                                          │
-│ ┌──────────────────────────────────────┐ │
-│ │ Buscar por sesión, fecha o palabra...│×│
-│ └──────────────────────────────────────┘ │
+│ ┌──────────────────────────────────────-┐│
+│ │ Buscar por sesión, fecha o palabra...×││
+│ └──────────────────────────────────────-┘│
 │                                          │
 │ ┌──────────────────────────────────────┐ │
 │ │ ▌ Sesión #3  ·  15 ene        Nueva  │ │
