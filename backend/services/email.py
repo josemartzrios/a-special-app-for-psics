@@ -60,8 +60,9 @@ async def send_reset_email(to_email: str, name: str, token: str):
         return None
 
 async def send_patient_invite(to_email: str, patient_name: str, psychologist_name: str, token: str):
-    invite_url = f"{_patient_portal_url()}/portal/invite?token={token}"
-    portal_url = f"{_patient_portal_url()}/portal/login"
+    base_url = _patient_portal_url()
+    invite_url = f"{base_url}/portal/invite?token={token}"
+    portal_url = f"{base_url}/portal/login"
     if not resend.api_key:
         print(f"Mock email: Invite patient {patient_name} -> {invite_url}")
         return None
