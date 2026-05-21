@@ -90,13 +90,13 @@ export default function PatientSummarySection({ sessionId, patientName }) {
       : ''
     return (
       <div className="border-t border-[#5a9e8a]/20 mt-2 px-6 pt-4 pb-5">
-        <div className="bg-[#f4faf8] border border-[#5a9e8a] rounded-xl px-4 py-3">
-          <div className="flex items-center gap-3">
+        <div className="bg-[#f4faf8] border border-[#5a9e8a] rounded-xl px-3 py-3">
+          <div className="flex items-center gap-2">
             <svg className="w-4 h-4 text-[#5a9e8a] flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
             </svg>
-            <div className="min-w-0 flex-1">
-              <p className="text-[13px] font-semibold text-[#5a9e8a]">Seguimiento enviado a {firstName}</p>
+            <div className="min-w-0 flex-1 overflow-hidden">
+              <p className="text-[13px] font-semibold text-[#5a9e8a] truncate">Seguimiento enviado a {firstName}</p>
               {hourStr && <p className="text-[11px] text-[#9ca3af]">Hoy · {hourStr}</p>}
             </div>
             <button
@@ -144,7 +144,7 @@ export default function PatientSummarySection({ sessionId, patientName }) {
     return (
       <div className="border-t border-ink/[0.06] mt-2 px-6 pt-4 pb-5">
         <div className="bg-[#f4faf8] border border-[#5a9e8a] rounded-xl px-4 py-3 text-[13px] text-[#5a9e8a] text-center animate-pulse">
-          Generando resumen…
+          Generando seguimiento…
         </div>
       </div>
     )
@@ -174,7 +174,7 @@ export default function PatientSummarySection({ sessionId, patientName }) {
 
       <div className="flex items-center gap-2 mb-1">
         <p className="font-sans text-[10px] font-bold tracking-[0.14em] uppercase" style={{ color: SAGE }}>
-          Resumen para el paciente
+          Seguimiento para el paciente
         </p>
         <span className="inline-flex items-center gap-1 bg-[#5a9e8a]/10 text-[#5a9e8a] text-[10px] font-sans font-medium px-2 py-0.5 rounded-full">
           <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -269,7 +269,7 @@ export default function PatientSummarySection({ sessionId, patientName }) {
             : 'bg-[#5a9e8a] text-white hover:bg-[#4a8a78]'
             }`}
         >
-          {sending ? 'Enviando…' : 'Enviar al portal →'}
+          {sending ? 'Enviando…' : 'Enviar al paciente'}
         </button>
       </div>
     </div>
