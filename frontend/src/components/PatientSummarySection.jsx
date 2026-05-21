@@ -29,6 +29,7 @@ export default function PatientSummarySection({ sessionId, patientName }) {
   const [sentAt, setSentAt] = useState(null)
   const [error, setError] = useState(null)
   const [sending, setSending] = useState(false)
+  const [showContent, setShowContent] = useState(false)
 
   useEffect(() => {
     if (!sessionId) return
@@ -89,14 +90,48 @@ export default function PatientSummarySection({ sessionId, patientName }) {
       : ''
     return (
       <div className="border-t border-[#5a9e8a]/20 mt-2 px-6 pt-4 pb-5">
-        <div className="flex items-center gap-3 bg-[#f4faf8] border border-[#5a9e8a] rounded-xl px-4 py-3">
-          <svg className="w-4 h-4 text-[#5a9e8a] flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
-          </svg>
-          <div className="min-w-0">
-            <p className="text-[13px] font-semibold text-[#5a9e8a]">Seguimiento enviado a {firstName}</p>
+        <div className="bg-[#f4faf8] border border-[#5a9e8a] rounded-xl px-3 py-3">
+          <div className="flex flex-col items-center text-center gap-0.5">
+            <div className="flex items-center gap-2">
+              
+              <p className="text-[13px] font-semibold text-[#5a9e8a]">Seguimiento enviado a {firstName}</p>
+            </div>
             {hourStr && <p className="text-[11px] text-[#9ca3af]">Hoy · {hourStr}</p>}
+            <button
+              onClick={() => setShowContent(v => !v)}
+              className="mt-2 text-[12px] font-medium text-[#5a9e8a] hover:underline"
+            >
+              {showContent ? 'Ocultar ↑' : 'Ver resumen'}
+            </button>
           </div>
+
+          {showContent && (
+            <div className="mt-4 pt-4 border-t border-[#5a9e8a]/20">
+              {SECTIONS.map(({ key, label, color }, idx) => {
+                const content = fields[key]
+                return (
+                  <div key={key} className={idx > 0 ? 'mt-6' : ''}>
+                    <p
+                      className="font-sans text-[10px] font-bold tracking-[0.12em] uppercase"
+                      style={{ fontVariant: 'small-caps', color: MUTED }}
+                    >
+                      {label}
+                    </p>
+                    <hr
+                      className="border-0 border-t border-current mt-1 mb-3"
+                      style={{ color: `${MUTED}33` }}
+                    />
+                    <p
+                      className="font-sans text-[14px] leading-relaxed px-1"
+                      style={{ color: MUTED }}
+                    >
+                      {content || '—'}
+                    </p>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
       </div>
     )
@@ -107,7 +142,7 @@ export default function PatientSummarySection({ sessionId, patientName }) {
     return (
       <div className="border-t border-ink/[0.06] mt-2 px-6 pt-4 pb-5">
         <div className="bg-[#f4faf8] border border-[#5a9e8a] rounded-xl px-4 py-3 text-[13px] text-[#5a9e8a] text-center animate-pulse">
-          Generando resumen…
+          Generando seguimiento…
         </div>
       </div>
     )
@@ -137,7 +172,7 @@ export default function PatientSummarySection({ sessionId, patientName }) {
 
       <div className="flex items-center gap-2 mb-1">
         <p className="font-sans text-[10px] font-bold tracking-[0.14em] uppercase" style={{ color: SAGE }}>
-          Resumen para el paciente
+          Seguimiento para el paciente
         </p>
         <span className="inline-flex items-center gap-1 bg-[#5a9e8a]/10 text-[#5a9e8a] text-[10px] font-sans font-medium px-2 py-0.5 rounded-full">
           <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -232,7 +267,7 @@ export default function PatientSummarySection({ sessionId, patientName }) {
             : 'bg-[#5a9e8a] text-white hover:bg-[#4a8a78]'
             }`}
         >
-          {sending ? 'Enviando…' : 'Enviar al portal →'}
+          {sending ? 'Enviando…' : 'Enviar al paciente'}
         </button>
       </div>
     </div>
