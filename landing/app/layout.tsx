@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import './globals.css'
+import WhatsAppButton from '../components/WhatsAppButton'
 
 export const metadata: Metadata = {
   title: 'SyqueX — Documentación clínica con IA para psicólogos',
@@ -45,6 +46,7 @@ export default function RootLayout({
       </head>
       <body className="bg-white text-ink font-sans antialiased">
         {children}
+        <WhatsAppButton />
       </body>
     </html>
   )
