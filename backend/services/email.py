@@ -60,7 +60,9 @@ async def send_reset_email(to_email: str, name: str, token: str):
         return None
 
 async def send_patient_invite(to_email: str, patient_name: str, psychologist_name: str, token: str):
-    invite_url = f"{_patient_portal_url()}/portal/invite?token={token}"
+    base_url = _patient_portal_url()
+    invite_url = f"{base_url}/portal/invite?token={token}"
+    portal_url = f"{base_url}/portal/login"
     if not resend.api_key:
         print(f"Mock email: Invite patient {patient_name} -> {invite_url}")
         return None
@@ -72,9 +74,14 @@ async def send_patient_invite(to_email: str, patient_name: str, psychologist_nam
             "html": f"""
             <p>Hola {patient_name},</p>
             <p>Tu psicólogo/a {psychologist_name} te ha invitado a acceder al Portal del Paciente.</p>
-            <p>En este portal podrás ver los resúmenes de tus sesiones y las tareas asignadas.</p>
-            <p>Haz clic en el siguiente enlace para crear tu contraseña y acceder:</p>
-            <p><a href="{invite_url}">Aceptar invitación</a></p>
+            <p>Aquí podrás ver los resúmenes de tus sesiones y las tareas asignadas.</p>
+            <p><strong>Cómo acceder:</strong></p>
+            <p>1. Crea tu contraseña (solo la primera vez)<br>
+            <a href="{invite_url}">→ Activar cuenta</a><br>
+            <small>Este enlace es de un solo uso. Úsalo solo una vez para activar tu cuenta.</small></p>
+            <p>2. Después, entra siempre aquí al portal<br>
+            <a href="{portal_url}">→ Entrar al portal</a><br>
+            <small>Guarda este enlace en tus favoritos para acceder cuando quieras.</small></p>
             <br>
             <p>El equipo de SyqueX</p>
             """
