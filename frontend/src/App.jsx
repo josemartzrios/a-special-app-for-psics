@@ -156,6 +156,21 @@ export function toggleExpandedSession(currentId, clickedId) {
   return currentId === clickedId ? null : clickedId;
 }
 
+// Pure filter for the Historial session list. Exported for unit testing.
+// Searches simultaneously: session display number, formatted date, raw_dictation.
+// Security: uses .includes() (no RegExp), guards null dictation with ?? '',
+// bypasses filter on whitespace-only query via .trim().
+export function filterHistorialSessions(sessions, query, displayNumMap) {
+  if (query.trim() === '') return sessions;
+  const q = query.toLowerCase();
+  return sessions.filter(s => {
+    const num = String(displayNumMap.get(String(s.id)) ?? '');
+    const date = formatDate(s.session_date).toLowerCase();
+    const dictation = (s.raw_dictation ?? '').toLowerCase();
+    return num.includes(q) || date.includes(q) || dictation.includes(q);
+  });
+}
+
 function App() {
   // Estado de pantalla
   const [authScreen, setAuthScreen] = useState(() => getScreenFromUrl());
@@ -186,6 +201,11 @@ function App() {
   // Desktop two-mode layout state
   const [desktopMode, setDesktopMode] = useState('session'); // 'session' | 'review'
   const [reviewExpandedSessionId, setReviewExpandedSessionId] = useState(null);
+
+  // Historial session search
+  const [historialSearchQuery, setHistorialSearchQuery] = useState('');
+  const historialSearchDesktopRef = useRef(null);
+  const historialSearchMobileRef  = useRef(null);
 
   // Template state
   const [template, setTemplate] = useState(null);
@@ -598,6 +618,7 @@ function App() {
 
   // Clear "Nueva" badge when patient changes
   useEffect(() => { setNewlyConfirmedSessionId(null); setDismissedOrphanIds(new Set()); }, [selectedPatientId]);
+  useEffect(() => { setHistorialSearchQuery(''); }, [selectedPatientId]);
 
   const handleSendDictation = async (dictation) => {
     const activeFormat = noteFormat;
@@ -721,6 +742,12 @@ function App() {
   // oldest-first from the backend (asc), so index 0 = oldest → gets number 1.
   const confirmedDisplayNum = new Map(
     confirmedSessions.map((s, i) => [String(s.id), i + 1])
+  );
+
+  const filteredHistorialSessions = filterHistorialSessions(
+    confirmedSessions,
+    historialSearchQuery,
+    confirmedDisplayNum
   );
 
   // Derive the latest note message for the note panel
@@ -1103,6 +1130,40 @@ function App() {
                     {/* Left: Historial (380px wide in Review mode) */}
                     <div className="w-[380px] flex-shrink-0 flex flex-col border-r border-black/[0.07] bg-[#f4f4f2] overflow-y-auto px-5 py-6">
                       <p className="text-[10px] font-bold uppercase tracking-[0.10em] text-ink-muted mb-4 px-2">Historial de Notas</p>
+
+                      {/* Session search input */}
+                      <div className="px-2 mb-3">
+                        <div className="relative flex items-center">
+                          <input
+                            ref={historialSearchDesktopRef}
+                            type="text"
+                            placeholder="Buscar por sesión, fecha o palabra..."
+                            maxLength={80}
+                            value={historialSearchQuery}
+                            onChange={e => setHistorialSearchQuery(e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === 'Escape') {
+                                if (historialSearchQuery) {
+                                  setHistorialSearchQuery('');
+                                } else {
+                                  e.currentTarget.blur();
+                                }
+                              }
+                            }}
+                            className="w-full bg-white border border-black/[0.1] rounded-lg px-3 py-1.5 text-sm text-[#18181b] placeholder:text-ink-tertiary focus:outline-none focus:border-[#5a9e8a]/60 transition-colors pr-7"
+                          />
+                          {historialSearchQuery && (
+                            <button
+                              onClick={() => { setHistorialSearchQuery(''); historialSearchDesktopRef.current?.focus(); }}
+                              aria-label="Limpiar búsqueda"
+                              className="absolute right-2 text-ink-tertiary hover:text-ink p-0.5 rounded transition-colors"
+                            >
+                              ×
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
                       <div className="space-y-3">
                         {sessionsLoading ? (
                           <div className="flex flex-col items-center gap-2 py-8">
@@ -1111,8 +1172,10 @@ function App() {
                           </div>
                         ) : confirmedSessions.length === 0 ? (
                           <p className="text-ink-tertiary text-xs px-2 italic">Sin notas SOAP confirmadas.</p>
+                        ) : filteredHistorialSessions.length === 0 ? (
+                          <p className="text-ink-tertiary text-[13px] text-center py-6">Sin resultados</p>
                         ) : (
-                          confirmedSessions.map((s, i) => {
+                          filteredHistorialSessions.map((s, i) => {
                             const isExpanded = reviewExpandedSessionId === String(s.id);
                             const isCustom = s.format === 'custom';
                             const hasNote = s.status === 'confirmed' && (
@@ -1391,12 +1454,50 @@ function App() {
 
               {/* Tab: Historial */}
               {mobileTab === 'historial' && (
-                <div className="flex-1 overflow-y-auto px-4 py-4">
-                  {confirmedSessions.length === 0 ? (
-                    <p className="text-ink-tertiary text-[14px] text-center mt-10">Sin sesiones registradas aún.</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {confirmedSessions.map((s, i) => {
+                <div className="flex-1 flex flex-col min-h-0">
+
+                  {/* Sticky search bar */}
+                  <div className="px-4 py-2 border-b border-ink/[0.05] flex-shrink-0 bg-white">
+                    <div className="relative flex items-center">
+                      <input
+                        ref={historialSearchMobileRef}
+                        type="text"
+                        placeholder="Buscar por sesión, fecha o palabra..."
+                        maxLength={80}
+                        value={historialSearchQuery}
+                        onChange={e => setHistorialSearchQuery(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Escape') {
+                            if (historialSearchQuery) {
+                              setHistorialSearchQuery('');
+                            } else {
+                              e.currentTarget.blur();
+                            }
+                          }
+                        }}
+                        className="w-full bg-white border border-black/[0.1] rounded-lg px-3 py-1.5 text-sm text-[#18181b] placeholder:text-ink-tertiary focus:outline-none focus:border-[#5a9e8a]/60 transition-colors pr-7"
+                      />
+                      {historialSearchQuery && (
+                        <button
+                          onClick={() => { setHistorialSearchQuery(''); historialSearchMobileRef.current?.focus(); }}
+                          aria-label="Limpiar búsqueda"
+                          className="absolute right-2 text-ink-tertiary hover:text-ink p-0.5 rounded transition-colors"
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Scrollable session list */}
+                  <div className="flex-1 overflow-y-auto px-4 py-4">
+                    {confirmedSessions.length === 0 ? (
+                      <p className="text-ink-tertiary text-[14px] text-center mt-10">Sin sesiones registradas aún.</p>
+                    ) : filteredHistorialSessions.length === 0 ? (
+                      <p className="text-ink-tertiary text-[13px] text-center py-6">Sin resultados</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {filteredHistorialSessions.map((s, i) => {
                         const isExpanded = expandedSessionId === String(s.id);
                         const isCustom = s.format === 'custom';
                         const hasNote = s.status === 'confirmed' && (
@@ -1470,6 +1571,7 @@ function App() {
                       })}
                     </div>
                   )}
+                  </div>
                 </div>
               )}
 

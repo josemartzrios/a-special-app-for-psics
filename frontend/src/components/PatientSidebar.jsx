@@ -134,6 +134,14 @@ export default function PatientSidebar({
   canCancelSubscription = false,
   onCancelSubscription,
 }) {
+  const [searchQuery, setSearchQuery] = useState('');
+  const searchInputRef = useRef(null);
+
+  const normalize = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const filteredConversations = conversations.filter(c =>
+    normalize(c.patient_name).includes(normalize(searchQuery))
+  );
+
   return (
     <aside className="w-60 flex-shrink-0 flex flex-col border-r border-black/[0.07] bg-white">
       {/* Brand Header */}
@@ -143,7 +151,41 @@ export default function PatientSidebar({
         </span>
       </div>
 
-      {/* Section Label: Pacientes + New button */}
+      {/* Search input */}
+      <div className="px-3 pb-2 flex-shrink-0">
+        <div className="relative flex items-center">
+          <input
+            ref={searchInputRef}
+            type="text"
+            placeholder="Buscar paciente..."
+            maxLength={100}
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Escape') {
+                if (searchQuery) {
+                  setSearchQuery('');
+                } else {
+                  e.currentTarget.blur();
+                }
+              }
+            }}
+            className="mt-4 w-full bg-white border border-black/[0.1] rounded-lg px-3 py-1.5 text-sm text-[#18181b] placeholder:text-ink-tertiary focus:outline-none focus:border-[#5a9e8a]/60 transition-colors pr-7"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => { setSearchQuery(''); searchInputRef.current?.focus(); }}
+              aria-label="Limpiar búsqueda"
+              className="absolute right-2 text-ink-tertiary hover:text-ink p-0.5 rounded transition-colors"
+            >
+              ×
+            </button>
+          )}
+        </div>
+      </div>
+
+
+       {/* Section Label: Pacientes + New button */}
       <div className="px-3 pt-3 pb-1 flex-shrink-0 flex items-center justify-between px-5">
         <span className="text-[10px] uppercase tracking-[0.12em] text-ink-tertiary font-bold px-2">
           Pacientes
@@ -202,8 +244,12 @@ export default function PatientSidebar({
             <p className="text-ink-secondary text-[13px]">Sin pacientes aún.</p>
             <p className="text-ink-tertiary text-xs mt-1">Crea uno para comenzar.</p>
           </div>
+        ) : filteredConversations.length === 0 ? (
+          <div className="px-4 py-6 text-center">
+            <p className="text-ink-tertiary text-[13px]">Sin resultados</p>
+          </div>
         ) : (
-          conversations.map(conv => (
+          filteredConversations.map(conv => (
             <PatientConversationItem
               key={conv.patient_id}
               conv={conv}

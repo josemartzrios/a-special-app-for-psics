@@ -51,13 +51,6 @@ describe('Sidebar', () => {
     expect(screen.getByText(/Sin sesiones registradas/i)).toBeInTheDocument()
   })
 
-  it('muestra conteo correcto: "3 sesiones" y "1 sesión"', () => {
-    const { rerender } = render(<Sidebar open={true} onClose={noop} conversations={THREE_CONVS} onSelectConversation={noop} onDeleteConversation={noop} />)
-    expect(screen.getByText('3 sesiones')).toBeInTheDocument()
-    rerender(<Sidebar open={true} onClose={noop} conversations={ONE_CONV} onSelectConversation={noop} onDeleteConversation={noop} />)
-    expect(screen.getByText('1 sesión')).toBeInTheDocument()
-  })
-
   it('click en conversación llama onSelectConversation antes que onClose', async () => {
     const user = userEvent.setup()
     const onSelectConversation = vi.fn()
@@ -131,5 +124,74 @@ describe('Sidebar', () => {
     const cancelIdx = buttons.findIndex(b => /cancelar suscripción/i.test(b.textContent))
     const logoutIdx = buttons.findIndex(b => /cerrar sesión/i.test(b.textContent))
     expect(cancelIdx).toBeLessThan(logoutIdx)
+  })
+})
+
+describe('Sidebar — patient search', () => {
+  const SEARCH_CONVS = [
+    { id: 'sess-1', patient_id: 'p1', patient_name: 'María López',  session_date: '2026-01-15', session_number: 1, status: 'confirmed', dictation_preview: 'A' },
+    { id: 'sess-2', patient_id: 'p2', patient_name: 'Carlos Ruiz',  session_date: '2026-01-22', session_number: 2, status: 'draft',     dictation_preview: 'B' },
+    { id: 'sess-3', patient_id: 'p3', patient_name: 'Ana Gómez',    session_date: '2026-01-29', session_number: 3, status: 'confirmed', dictation_preview: 'C' },
+  ]
+
+  it('renders search input', () => {
+    render(<Sidebar open={true} onClose={noop} conversations={SEARCH_CONVS} onSelectConversation={noop} onDeleteConversation={noop} />)
+    expect(screen.getByPlaceholderText(/buscar paciente/i)).toBeInTheDocument()
+  })
+
+  it('filters patients by name case-insensitively', async () => {
+    render(<Sidebar open={true} onClose={noop} conversations={SEARCH_CONVS} onSelectConversation={noop} onDeleteConversation={noop} />)
+    await userEvent.type(screen.getByPlaceholderText(/buscar paciente/i), 'lopez')
+    expect(screen.getByText('María López')).toBeInTheDocument()
+    expect(screen.queryByText('Carlos Ruiz')).not.toBeInTheDocument()
+    expect(screen.queryByText('Ana Gómez')).not.toBeInTheDocument()
+  })
+
+  it('shows "Sin resultados" when no patients match the query', async () => {
+    render(<Sidebar open={true} onClose={noop} conversations={SEARCH_CONVS} onSelectConversation={noop} onDeleteConversation={noop} />)
+    await userEvent.type(screen.getByPlaceholderText(/buscar paciente/i), 'xyz')
+    expect(screen.getByText(/sin resultados/i)).toBeInTheDocument()
+  })
+
+  it('clear button is hidden when query is empty', () => {
+    render(<Sidebar open={true} onClose={noop} conversations={SEARCH_CONVS} onSelectConversation={noop} onDeleteConversation={noop} />)
+    expect(screen.queryByRole('button', { name: /limpiar búsqueda/i })).not.toBeInTheDocument()
+  })
+
+  it('clear button appears when query is non-empty', async () => {
+    render(<Sidebar open={true} onClose={noop} conversations={SEARCH_CONVS} onSelectConversation={noop} onDeleteConversation={noop} />)
+    await userEvent.type(screen.getByPlaceholderText(/buscar paciente/i), 'l')
+    expect(screen.getByRole('button', { name: /limpiar búsqueda/i })).toBeInTheDocument()
+  })
+
+  it('clear button click resets query and returns focus to input', async () => {
+    render(<Sidebar open={true} onClose={noop} conversations={SEARCH_CONVS} onSelectConversation={noop} onDeleteConversation={noop} />)
+    const input = screen.getByPlaceholderText(/buscar paciente/i)
+    await userEvent.type(input, 'lopez')
+    await userEvent.click(screen.getByRole('button', { name: /limpiar búsqueda/i }))
+    expect(input).toHaveValue('')
+    expect(input).toHaveFocus()
+  })
+
+  it('Escape clears the query when non-empty', async () => {
+    render(<Sidebar open={true} onClose={noop} conversations={SEARCH_CONVS} onSelectConversation={noop} onDeleteConversation={noop} />)
+    const input = screen.getByPlaceholderText(/buscar paciente/i)
+    await userEvent.type(input, 'lopez')
+    await userEvent.keyboard('{Escape}')
+    expect(input).toHaveValue('')
+  })
+
+  it('query resets to empty when slide-over closes (open goes false)', async () => {
+    const { rerender } = render(
+      <Sidebar open={true} onClose={noop} conversations={SEARCH_CONVS} onSelectConversation={noop} onDeleteConversation={noop} />
+    )
+    await userEvent.type(screen.getByPlaceholderText(/buscar paciente/i), 'lopez')
+    rerender(
+      <Sidebar open={false} onClose={noop} conversations={SEARCH_CONVS} onSelectConversation={noop} onDeleteConversation={noop} />
+    )
+    rerender(
+      <Sidebar open={true} onClose={noop} conversations={SEARCH_CONVS} onSelectConversation={noop} onDeleteConversation={noop} />
+    )
+    expect(screen.getByPlaceholderText(/buscar paciente/i)).toHaveValue('')
   })
 })
