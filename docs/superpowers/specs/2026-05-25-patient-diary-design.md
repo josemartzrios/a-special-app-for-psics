@@ -228,7 +228,43 @@ Al abrir un paciente desde el tab Pacientes:
 
 ---
 
-## 8. Privacidad y acceso
+## 8. Cifrado de campos sensibles
+
+Reutiliza el módulo `backend/crypto.py` ya implementado (Fernet AES-128-CBC + HMAC-SHA256, prefijo de versión `v1:`). Ver spec completo en `docs/superpowers/specs/2026-04-19-encryption-design.md`.
+
+### Campos cifrados en las nuevas tablas
+
+| Tabla | Campo | Acción |
+|-------|-------|--------|
+| `diary_messages` | `body` | `encrypt()` al escribir, `decrypt()` al leer |
+| `diary_summaries` | `summary_text` | `encrypt()` al escribir, `decrypt()` al leer |
+| `diary_chats` | `title` | `encrypt()` al escribir, `decrypt()` al leer |
+
+### Rutas de escritura
+
+| Endpoint / función | Campos cifrados |
+|--------------------|-----------------|
+| `POST /portal/diary/chats` | `title` |
+| `PATCH /portal/diary/chats/{chat_id}` | `title` (si presente) |
+| `POST /portal/diary/chats/{chat_id}/messages` | `body` |
+| Cron `generate_diary_summary()` | `summary_text` |
+
+### Rutas de lectura
+
+| Endpoint / función | Campos descifrados |
+|--------------------|--------------------|
+| `GET /portal/diary/chats` | `title` de cada chat |
+| `GET /portal/diary/chats/{chat_id}` | `title` + `body` de todos los mensajes |
+| `GET /patients/{id}/diary-summary` (psicólogo) | `summary_text` |
+| Cron (al leer mensajes para generar resumen) | `body` de cada `diary_message` |
+
+### Nota de consistencia
+
+El embedding no aplica para el diario — no hay búsqueda semántica sobre entradas. Por tanto no existe el conflicto "cifrar antes o después del embedding" que sí ocurre en `clinical_notes`.
+
+---
+
+## 9. Privacidad y acceso (control de acceso)
 
 - El psicólogo **nunca ve los mensajes individuales** de las entradas — solo el resumen generado por IA
 - Los chats con `privacy = 'private'` nunca son incluidos en el resumen, independientemente de su `status`
