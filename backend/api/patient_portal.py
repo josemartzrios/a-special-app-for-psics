@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from anthropic import AsyncAnthropic
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import or_, and_
@@ -142,10 +143,22 @@ async def get_availability(month: str, patient_id: str = Depends(get_current_pat
     )
     cancelled = can_res.scalar_one_or_none()
 
+    # Check if psychologist has any future available slots (any month)
+    future_check = await db.execute(
+        select(AvailabilitySlot.id)
+        .where(
+            AvailabilitySlot.psychologist_id == patient.psychologist_id,
+            AvailabilitySlot.slot_date >= _today,
+            AvailabilitySlot.status == 'available'
+        ).limit(1)
+    )
+    has_future_availability = future_check.scalar_one_or_none() is not None
+
     return {
         "slots": [{"id": str(s.id), "slot_date": s.slot_date, "start_time": s.start_time, "duration_minutes": s.duration_minutes} for s in slots],
         "upcoming_booking": {"id": str(upcoming.id), "slot_date": upcoming.slot_date, "start_time": upcoming.start_time, "duration_minutes": upcoming.duration_minutes} if upcoming else None,
         "cancelled_booking": {"id": str(cancelled.id), "slot_date": cancelled.slot_date, "start_time": cancelled.start_time, "duration_minutes": cancelled.duration_minutes} if cancelled else None,
+        "has_future_availability": has_future_availability,
     }
 
 class BookRequest(BaseModel):
@@ -262,3 +275,36 @@ async def acknowledge_cancellation(
     slot.acknowledged = True
     await db.commit()
     return {"status": "ok"}
+
+
+class ExplainRequest(BaseModel):
+    selected_text: str
+    context: str
+
+_MAX_SELECTED_TEXT = 500
+_MAX_CONTEXT = 3000
+
+@router.post("/explain")
+async def explain_term(payload: ExplainRequest, patient_id: str = Depends(get_current_patient)):
+    if len(payload.selected_text) > _MAX_SELECTED_TEXT:
+        raise HTTPException(status_code=400, detail="Texto seleccionado demasiado largo")
+
+    context_trimmed = payload.context[:_MAX_CONTEXT]
+
+    client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+    response = await client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=300,
+        messages=[{
+            "role": "user",
+            "content": (
+                "Eres un asistente que ayuda a pacientes de psicología a entender el lenguaje de sus resúmenes de sesión.\n\n"
+                f'El paciente seleccionó: "{payload.selected_text}"\n\n'
+                f"Contexto del resumen:\n{context_trimmed}\n\n"
+                f'Explica qué significa "{payload.selected_text}" en lenguaje cotidiano, como si le hablaras a alguien sin conocimientos técnicos. '
+                "Sé breve (2-3 oraciones máximo), cálido y accesible. No uses jerga clínica. "
+                "No incluyas el término como título ni encabezado. Empieza directamente con la explicación. No des recomendaciones ni consejos, solo una explicación clara y sencilla del término o frase seleccionada, basada en el contexto dado."
+            )
+        }]
+    )
+    return {"explanation": response.content[0].text}

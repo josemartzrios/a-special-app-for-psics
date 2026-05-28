@@ -224,7 +224,7 @@ def _try_send_email(patient_name: str, patient_email: str, psych_name: str) -> N
     try:
         import resend as _resend
         _resend.api_key = resend_key
-        portal_url = "https://app.syquex.mx/portal/login"
+        portal_url = settings.PATIENT_PORTAL_URL or settings.FRONTEND_URL
         _resend.Emails.send({
             "from": from_email,
             "to": patient_email,
@@ -232,7 +232,7 @@ def _try_send_email(patient_name: str, patient_email: str, psych_name: str) -> N
             "html": (
                 f"<p>Hola {patient_name},</p>"
                 f"<p>Tu psicólogo <strong>{psych_name}</strong> compartió el resumen de tu última sesión.</p>"
-                f'<p><a href="{portal_url}">Ver en SyqueX Portal →</a></p>'
+                f'<p><a href="{portal_url}">Ver en SyqueX Portal </a></p>'
             ),
         })
     except Exception:

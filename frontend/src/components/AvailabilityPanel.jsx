@@ -163,7 +163,7 @@ export default function AvailabilityPanel({ onParseAvailability, onConfirmSlots 
                 Interpretando…
               </>
             ) : (
-              'Interpretar disponibilidad →'
+              'Interpretar disponibilidad'
             )}
           </button>
         )}

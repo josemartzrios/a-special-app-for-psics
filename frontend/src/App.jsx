@@ -1629,7 +1629,13 @@ function App() {
           </div>
         )}
 
-        <BottomNav activeSection={activeSection} onSectionChange={setActiveSection} />
+        <BottomNav
+          activeSection={activeSection}
+          onSectionChange={(section) => {
+            setActiveSection(section);
+            if (section === 'patients') setSelectedPatientId(null);
+          }}
+        />
       </div>
 
 
