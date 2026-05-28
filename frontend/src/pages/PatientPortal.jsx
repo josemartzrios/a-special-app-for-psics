@@ -21,6 +21,7 @@ export default function PatientPortal() {
   const [cancelError, setCancelError]           = useState(null);
   const [cancelledBooking, setCancelledBooking] = useState(null);
   const [acknowledging, setAcknowledging]       = useState(false);
+  const [hasAvailability, setHasAvailability]   = useState(null);
   const detailRef = useRef(null);
 
   useEffect(() => {
@@ -54,6 +55,7 @@ export default function PatientPortal() {
       .then(data => {
         setUpcomingBooking(data.upcoming_booking ?? null);
         setCancelledBooking(data.cancelled_booking ?? null);
+        setHasAvailability(data.has_future_availability ?? false);
         setCancelError(null);
       })
       .catch(() => {});
@@ -208,8 +210,8 @@ export default function PatientPortal() {
               />
             )}
 
-            {/* Booking CTA — solo visible cuando no hay cita activa ni cancelación pendiente */}
-            {!cancelledBooking && !upcomingBooking && (
+            {/* Booking CTA — solo visible cuando no hay cita activa, ni cancelación pendiente, y el psicólogo tiene horarios disponibles */}
+            {!cancelledBooking && !upcomingBooking && hasAvailability === true && (
               <button
                 onClick={() => setBookingModalOpen(true)}
                 className="w-full mb-5 flex items-center gap-3 bg-[#5a9e8a] hover:bg-[#4a8271] active:scale-[0.98] text-white rounded-xl px-4 py-3 transition-all"

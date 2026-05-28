@@ -142,10 +142,22 @@ async def get_availability(month: str, patient_id: str = Depends(get_current_pat
     )
     cancelled = can_res.scalar_one_or_none()
 
+    # Check if psychologist has any future available slots (any month)
+    future_check = await db.execute(
+        select(AvailabilitySlot.id)
+        .where(
+            AvailabilitySlot.psychologist_id == patient.psychologist_id,
+            AvailabilitySlot.slot_date >= _today,
+            AvailabilitySlot.status == 'available'
+        ).limit(1)
+    )
+    has_future_availability = future_check.scalar_one_or_none() is not None
+
     return {
         "slots": [{"id": str(s.id), "slot_date": s.slot_date, "start_time": s.start_time, "duration_minutes": s.duration_minutes} for s in slots],
         "upcoming_booking": {"id": str(upcoming.id), "slot_date": upcoming.slot_date, "start_time": upcoming.start_time, "duration_minutes": upcoming.duration_minutes} if upcoming else None,
         "cancelled_booking": {"id": str(cancelled.id), "slot_date": cancelled.slot_date, "start_time": cancelled.start_time, "duration_minutes": cancelled.duration_minutes} if cancelled else None,
+        "has_future_availability": has_future_availability,
     }
 
 class BookRequest(BaseModel):

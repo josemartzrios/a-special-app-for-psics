@@ -1,0 +1,28 @@
+{
+  "name": "Portal SyqueX",
+  "short_name": "Portal",
+  "description": "Portal de pacientes SyqueX",
+  "start_url": "/portal",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#ffffff",
+  "theme_color": "#5a9e8a",
+  "icons": [
+    {
+      "src": "/icons/logored.png?v=2",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icons/logored.png?v=2",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "/icons/logored.png?v=2",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
