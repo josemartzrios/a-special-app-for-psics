@@ -2,7 +2,6 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from pydantic import BaseModel
-from passlib.context import CryptContext
 from datetime import datetime, timedelta, timezone
 
 from database import get_db, PatientUser, PatientPasswordResetToken, Patient
@@ -11,16 +10,14 @@ from config import settings
 from api.limiter import limiter
 from fastapi import Request
 import jwt
-import hashlib
 import secrets
 import asyncio
 import random
 from collections import defaultdict
-from api.auth import validate_password, hash_token, get_current_psychologist
+from api.auth import validate_password, hash_token, get_current_psychologist, hash_password, verify_password
 
 router = APIRouter()
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 def create_patient_access_token(patient_user: PatientUser) -> str:
     expire = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
@@ -33,14 +30,6 @@ def create_patient_access_token(patient_user: PatientUser) -> str:
         "type": "access",
     }
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
-
-
-def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
-
-
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
 
 
 _forgot_pw_email_attempts: dict = defaultdict(list)

@@ -183,7 +183,7 @@ Con cada nuevo feature con merge a dev actualiza los diagramas y documentos del 
 
 Haz pruebas unitarias de cada cambio que realices en el backend y frontend y asegúrate de que todo funcione correctamente.
 
-Sigue los skills del proyecto@skills/security.md y @skills/clinic/agent-clinic.md y @skills/solid.md
+Sigue los skills del proyecto @skills/security.md y @skills/clinic/agent-clinic.md y @skills/best-practices.md
 
 ---
 

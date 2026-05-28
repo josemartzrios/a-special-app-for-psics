@@ -182,24 +182,18 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=F
 
 from fastapi import Query
 
-async def get_current_psychologist(
-    token: str = Depends(oauth2_scheme),
-    token_query: Optional[str] = Query(None, alias="token"),
-    db: AsyncSession = Depends(get_db),
-) -> Psychologist:
-    # Favor header token, fall back to query token
-    effective_token = token or token_query
-    
+
+def _decode_psychologist_token(raw_token: Optional[str]) -> str:
+    """Validate JWT structure and return psychologist_id. Raises HTTPException on any failure."""
     credentials_exc = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Token inválido o sesión expirada",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    if not effective_token:
+    if not raw_token:
         raise credentials_exc
-
     try:
-        payload = jwt.decode(effective_token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        payload = jwt.decode(raw_token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         psychologist_id: Optional[str] = payload.get("sub")
         if not psychologist_id or payload.get("type") != "access":
             raise credentials_exc
@@ -211,7 +205,37 @@ async def get_current_psychologist(
         )
     except jwt.PyJWTError:
         raise credentials_exc
+    return psychologist_id
 
+
+async def get_current_psychologist(
+    token: str = Depends(oauth2_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> Psychologist:
+    """Standard auth — token must arrive via Authorization: Bearer header."""
+    psychologist_id = _decode_psychologist_token(token)
+    credentials_exc = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Token inválido o sesión expirada",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    psy = await db.get(Psychologist, psychologist_id)
+    if not psy or not psy.is_active:
+        raise credentials_exc
+    return psy
+
+
+async def get_current_psychologist_sse(
+    token: Optional[str] = Query(None, alias="token"),
+    db: AsyncSession = Depends(get_db),
+) -> Psychologist:
+    """SSE-only auth variant — accepts token via ?token= because EventSource cannot set headers."""
+    psychologist_id = _decode_psychologist_token(token)
+    credentials_exc = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Token inválido o sesión expirada",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
     psy = await db.get(Psychologist, psychologist_id)
     if not psy or not psy.is_active:
         raise credentials_exc

@@ -73,7 +73,7 @@ El portal del paciente agrega un segundo tab a la barra inferior existente:
 
 **Composer (flex-shrink: 0):**
 - Textarea con placeholder "Escribe un momento…"
-- Botón `→` (avión, SVG outline) a la derecha: **comparte la conversación completa** con el psicólogo
+- Botón (avión, SVG outline) a la derecha: **comparte la conversación completa** con el psicólogo
   - Activo solo cuando badge = "Mi psicólogo" y hay al menos un mensaje
   - Deshabilitado (sage apagado) cuando badge = "Solo yo"
 - Enter o submit implícito agrega el mensaje al chat
@@ -85,13 +85,13 @@ El portal del paciente agrega un segundo tab a la barra inferior existente:
 - Sin chips, sin composer
 - El paciente puede ver la entrada pero no puede agregarle nada
 
-### 3.4 Modal de confirmación (al pulsar →)
+### 3.4 Modal de confirmación (al pulsar)
 
 Sheet desde abajo con:
 - Ícono avión de papel (SVG, sage)
 - Título: "¿Compartir con tu psicólogo?"
 - Aviso amber: "Una vez enviado no podrás agregar más mensajes a este chat."
-- Botón primario: "Enviar a mi psicólogo →"
+- Botón primario: "Enviar a mi psicólogo"
 - Botón secundario: "Cancelar"
 
 ---
@@ -140,18 +140,76 @@ Sheet desde abajo con:
 
 ---
 
-## 5. Backend — Endpoints del portal del paciente
+## 5. Backend — Endpoints
 
-Todos bajo `/portal` con autenticación JWT de paciente (`get_current_patient()`).
+### 5.1 Router del paciente — `backend/api/diary_portal.py` (nuevo archivo)
+
+> **SRP**: se crea un router separado en lugar de extender `patient_portal.py`. Sigue el patrón de módulos por dominio del proyecto.
+
+Todos bajo `/portal/diary` con autenticación JWT de paciente (`get_current_patient()`).
 
 | Método | Ruta | Acción |
 |--------|------|--------|
-| GET | `/portal/diary/chats` | Listar chats del paciente (todas, paginado) |
-| POST | `/portal/diary/chats` | Crear nuevo chat (title, privacy) |
+| GET | `/portal/diary/chats` | Listar chats del paciente (paginado, 20 por página) |
+| POST | `/portal/diary/chats` | Crear nuevo chat (`title` max 100 chars, `privacy`) |
 | GET | `/portal/diary/chats/{chat_id}` | Obtener chat con sus mensajes |
-| POST | `/portal/diary/chats/{chat_id}/messages` | Agregar mensaje (solo si status=draft) |
-| PATCH | `/portal/diary/chats/{chat_id}` | Actualizar title o privacy (solo si status=draft) |
-| POST | `/portal/diary/chats/{chat_id}/send` | Marcar como enviado (status→sent, sent_at=now) |
+| POST | `/portal/diary/chats/{chat_id}/messages` | Agregar mensaje (solo si `status=draft`) |
+| PATCH | `/portal/diary/chats/{chat_id}` | Actualizar `title` o `privacy` (solo si `status=draft`) |
+| POST | `/portal/diary/chats/{chat_id}/send` | Enviar chat al psicólogo |
+
+**OWASP A01 — Verificación de ownership en todos los endpoints con `{chat_id}`:**
+
+Antes de cualquier operación sobre un chat, el backend verifica que el chat pertenece al paciente autenticado:
+
+```python
+chat = await db.get(DiaryChat, chat_uuid)
+if not chat or chat.patient_id != current_patient_uuid:
+    raise HTTPException(status_code=404, detail="Chat no encontrado")
+```
+
+Usar 404 (no 403) para no revelar existencia de recursos ajenos.
+
+**OWASP A04 — Envío atómico para evitar race condition:**
+
+`POST /send` usa `UPDATE ... WHERE status='draft'` y verifica `rowcount == 1`:
+
+```python
+result = await db.execute(
+    update(DiaryChat)
+    .where(DiaryChat.id == chat_uuid, DiaryChat.status == "draft")
+    .values(status="sent", sent_at=datetime.now(UTC))
+)
+if result.rowcount == 0:
+    raise HTTPException(status_code=409, detail="Este chat ya fue enviado")
+```
+
+**Input validation:**
+
+| Campo | Límite |
+|-------|--------|
+| `diary_chats.title` | max 100 caracteres |
+| `diary_messages.body` | max 2000 caracteres |
+| Mensajes por chat | max 50 mensajes |
+| Chats activos (`status=draft`) por paciente | max 20 |
+
+### 5.2 Endpoints del psicólogo — `backend/api/routes.py`
+
+Autenticación JWT de psicólogo (`get_current_user()`).
+
+| Método | Ruta | Acción |
+|--------|------|--------|
+| GET | `/patients/{patient_id}/diary-summaries` | Listar resúmenes del paciente |
+| GET | `/patients/{patient_id}/diary-summaries/upcoming` | Resumen de la próxima sesión (si existe) |
+
+**OWASP A01 — Ownership del paciente:**
+
+Antes de devolver cualquier dato, verificar que el paciente pertenece al psicólogo autenticado:
+
+```python
+patient = await db.get(Patient, patient_uuid)
+if not patient or patient.psychologist_id != current_psychologist_uuid:
+    raise HTTPException(status_code=404, detail="Paciente no encontrado")
+```
 
 ---
 
@@ -218,7 +276,7 @@ Al abrir un paciente desde el tab Pacientes:
 **Tarjeta "Resumen de diario" (solo visible si existe `diary_summaries` para la próxima sesión):**
 - Header sage: ícono book + label "Resumen de diario" + "Sesión hoy HH:MM"
 - Cuerpo: párrafo de texto generado por la IA
-- Footer: "N entradas · [rango de fechas]" + link "Ver entradas →" (opcional, fase 2)
+- Footer: "N entradas · [rango de fechas]" + link "Ver entradas" (opcional, fase 2)
 - Border: `rgba(90,158,138,0.3)`, background: `#f0faf7`
 
 **Sección "Resúmenes anteriores":**
@@ -304,7 +362,7 @@ El embedding no aplica para el diario — no hay búsqueda semántica sobre entr
 | Decisión | Alternativa descartada | Razón |
 |----------|----------------------|-------|
 | Privacidad a nivel de chat (no mensaje) | Privacidad por mensaje | Más simple cognitivamente para el paciente; un chat tiene una intención |
-| Envío explícito (botón →) | Compartir automático cuando badge = "Mi psicólogo" | El paciente necesita control claro del momento en que comparte |
+| Envío explícito (botón ) | Compartir automático cuando badge = "Mi psicólogo" | El paciente necesita control claro del momento en que comparte |
 | Psicólogo ve solo el resumen, no los mensajes | Psicólogo ve mensajes completos | Preserva el espacio privado del paciente; el resumen es suficiente contexto clínico |
 | Resumen generado 24h antes del slot | Generado al enviar la entrada | El psicólogo lo recibe justo cuando lo necesita, con todas las entradas de la semana |
 | Prompt extractivo estricto | Prompt interpretativo clínico | Evita alucinaciones y respeta que la interpretación es tarea del psicólogo |

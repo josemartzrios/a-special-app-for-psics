@@ -22,7 +22,7 @@ from agent.tools import generate_evolution_report, search_patient_history
 from agent.embeddings import get_embedding, ZERO_VECTOR
 from api.limiter import limiter
 from exceptions import InvalidUUIDError, SessionNotFoundError, PatientNotFoundError, UnauthorizedAccessError
-from api.auth import get_current_psychologist
+from api.auth import get_current_psychologist, get_current_psychologist_sse
 from api.audit import log_audit
 
 
@@ -803,7 +803,7 @@ async def get_job_status(
 @router.get("/jobs/{job_id}/stream", tags=["jobs"])
 async def stream_job_status(
     job_id: str,
-    psychologist: Psychologist = Depends(get_current_psychologist),
+    psychologist: Psychologist = Depends(get_current_psychologist_sse),
 ):
     """SSE endpoint for job progress. Stops when status is completed or failed."""
     from fastapi.responses import StreamingResponse
