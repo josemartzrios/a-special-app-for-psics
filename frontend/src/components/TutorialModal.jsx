@@ -5,29 +5,33 @@ const SLIDES_DESKTOP = [
   {
     icon: '👋',
     title: 'Bienvenido a SyqueX',
-    body: 'Tu flujo de trabajo: Agrega un paciente → Escribe tus apuntes → El asistente genera la nota → Confirma y guarda.',
-    flow: true,
+    body: 'Tu flujo de trabajo: Crea el expediente de tu paciente → Escribe/dicta tus apuntes → Invita al paciente al portal → Envía un resumen al paciente → Establece tus horarios disponibles -> Tu paciente agenda una nueva sesión.',
   },
   {
     icon: '👤',
-    title: 'Crea tu primer paciente',
+    title: 'Crea el expediente del paciente',
     body: 'Haz clic en el botón Nuevo Expediente. Cada paciente tiene su propio historial de sesiones y notas clínicas.',
   },
   {
-    icon: '✏️',
-    title: 'Escribe tus apuntes',
-    body: 'Escribe libremente tus apuntes — sin estructura. El asistente organiza automáticamente tu nota clínica.',
+    icon: '📧',
+    title: 'Invita al paciente al portal',
+    body: 'Invita al paciente a su portal privado. A tu paciente le llegará una invitación por correo electrónico. Ahí puede ver sus notas, resúmenes y próximos pasos. También puede agendar nuevas sesiones contigo.',
   },
   {
-    icon: '📄',
-    title: 'Revisa y confirma la nota',
-    body: 'La nota generada aparece a la derecha. Edita cualquier campo directo en la nota antes de confirmar. Queda guardada en el expediente.',
+    icon: '✏️',
+    title: 'Documenta tu sesión',
+    body: 'Cuando tengas sesión con tu paciente. Escribe o dicta libremente tus apuntes, puedes personalizar tu nota clínica. El asistente organiza automáticamente tu nota y confirmas.',
   },
   {
     icon: '📨',
-    title: 'Comparte el seguimiento con tu paciente',
-    body: 'Después de confirmar la nota, genera un resumen en lenguaje simple. Lo revisas, lo editas y lo envías. El paciente lo ve en su propio portal.',
+    title: 'Envía un resumen al paciente',
+    body: 'Después de confirmar la nota, genera un seguimiento a partir de la sesión que tuviste con tu paciente. Lo revisas, lo editas y lo envías. El paciente lo ve en su propio portal.',
   },
+  {
+    icon: '👤',
+    title: 'Tu paciente agenda una nueva sesión',
+    body: 'En tu calendario veras las sesiones agendadas del dia. El paciente puede agendar nuevas sesiones desde su portal, eligiendo entre los horarios que tú estableciste como disponibles.',
+  }
 ]
 
 function FlowDiagram() {

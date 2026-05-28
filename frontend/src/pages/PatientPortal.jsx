@@ -5,6 +5,7 @@ import TutorialModal from '../components/TutorialModal';
 import PatientBookingModal from '../components/PatientBookingModal';
 import UpcomingBookingCard from '../components/UpcomingBookingCard';
 import CancelledBookingCard from '../components/CancelledBookingCard';
+import GlossarySheet from '../components/GlossarySheet';
 
 export default function PatientPortal() {
   const [summaries, setSummaries] = useState([]);
@@ -22,7 +23,13 @@ export default function PatientPortal() {
   const [cancelledBooking, setCancelledBooking] = useState(null);
   const [acknowledging, setAcknowledging]       = useState(false);
   const [hasAvailability, setHasAvailability]   = useState(null);
+  const [selectionText, setSelectionText]       = useState('');
+  const [pillVisible, setPillVisible]           = useState(false);
+  const [pillPosition, setPillPosition]         = useState(null); // { top, left } desktop only
+  const [glossaryOpen, setGlossaryOpen]         = useState(false);
+  const [glossaryContext, setGlossaryContext]   = useState('');
   const detailRef = useRef(null);
+  const contentRef = useRef(null);
 
   useEffect(() => {
     document.body.style.overflow = 'auto';
@@ -62,6 +69,68 @@ export default function PatientPortal() {
   };
 
   useEffect(() => { loadUpcomingBooking(); }, []);
+
+  // Text-selection detection for glossary pill
+  useEffect(() => {
+    if (!selectedSummary) return;
+    let timer;
+
+    const handleSelectionChange = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (glossaryOpen) return;
+
+        const selection = window.getSelection();
+        const text = selection?.toString().trim();
+
+        if (!text || text.length > 500 || !contentRef.current || !selection.rangeCount) {
+          setPillVisible(false);
+          return;
+        }
+
+        const range = selection.getRangeAt(0);
+        if (!contentRef.current.contains(range.commonAncestorContainer)) {
+          setPillVisible(false);
+          return;
+        }
+
+        setSelectionText(text);
+
+        if (window.innerWidth >= 768) {
+          const rect = range.getBoundingClientRect();
+          setPillPosition({
+            top: Math.max(60, rect.top - 52),
+            left: rect.left + rect.width / 2,
+          });
+        }
+
+        setPillVisible(true);
+      }, 60);
+    };
+
+    document.addEventListener('selectionchange', handleSelectionChange);
+    return () => {
+      document.removeEventListener('selectionchange', handleSelectionChange);
+      clearTimeout(timer);
+    };
+  }, [selectedSummary, glossaryOpen]);
+
+  const openGlossary = () => {
+    const context = [
+      selectedSummary?.topics_worked && `Temas trabajados: ${selectedSummary.topics_worked}`,
+      selectedSummary?.homework && `Tarea: ${selectedSummary.homework}`,
+    ].filter(Boolean).join('\n\n');
+    setGlossaryContext(context);
+    setGlossaryOpen(true);
+    setPillVisible(false);
+  };
+
+  const closeGlossary = () => {
+    setGlossaryOpen(false);
+    setPillVisible(false);
+    setSelectionText('');
+    window.getSelection()?.removeAllRanges();
+  };
 
   const loadSummaries = async () => {
     setLoading(true);
@@ -291,7 +360,7 @@ export default function PatientPortal() {
               </div>
             ) : selectedSummary ? (
               <div className="bg-white rounded-xl border border-[#18181b]/[0.08] overflow-hidden">
-                <div className="p-4">
+                <div className="p-4" ref={contentRef}>
                   <div className="mb-3.5">
                     <div className="text-[10px] text-[#5a9e8a] font-bold tracking-widest mb-1">RESUMEN DE SESIÓN</div>
                     <div className="text-sm font-semibold text-[#18181b]">
@@ -343,6 +412,52 @@ export default function PatientPortal() {
           </div>
         </div>
       </main>
+
+      {/* Glossary pill — appears when patient selects text inside a summary */}
+      {pillVisible && !glossaryOpen && (
+        <>
+          {/* Mobile: fixed bottom-center */}
+          <div className="md:hidden fixed bottom-24 left-1/2 -translate-x-1/2 z-40 pointer-events-auto">
+            <button
+              onMouseDown={(e) => { e.preventDefault(); openGlossary(); }}
+              onTouchEnd={(e) => { e.preventDefault(); openGlossary(); }}
+              className="flex items-center gap-2 bg-[#18181b] text-white text-sm font-medium px-4 py-2.5 rounded-full shadow-lg active:scale-95 transition-transform"
+            >
+              <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"
+                  d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              ¿Qué significa?
+            </button>
+          </div>
+
+          {/* Desktop: near the selection */}
+          <div
+            className="hidden md:block fixed z-40 pointer-events-auto"
+            style={{ top: pillPosition?.top, left: pillPosition?.left, transform: 'translateX(-50%)' }}
+          >
+            <button
+              onMouseDown={(e) => { e.preventDefault(); openGlossary(); }}
+              className="flex items-center gap-2 bg-[#18181b] text-white text-sm font-medium px-4 py-2 rounded-full shadow-lg hover:bg-[#18181b]/90 transition-colors"
+            >
+              <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"
+                  d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              ¿Qué significa?
+            </button>
+          </div>
+        </>
+      )}
+
+      {glossaryOpen && (
+        <GlossarySheet
+          selectedText={selectionText}
+          context={glossaryContext}
+          desktopPosition={pillPosition}
+          onClose={closeGlossary}
+        />
+      )}
 
       <TutorialModal
         visible={tutorialVisible}

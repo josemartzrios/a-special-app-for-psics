@@ -4,9 +4,9 @@ import { describe, it, expect, vi } from 'vitest';
 import BottomNav from './BottomNav';
 
 describe('BottomNav', () => {
-  it('renders Pacientes and Agenda tabs', () => {
+  it('renders Inicio and Agenda tabs', () => {
     render(<BottomNav activeSection="patients" onSectionChange={() => {}} />);
-    expect(screen.getByText('Pacientes')).toBeInTheDocument();
+    expect(screen.getByText('Inicio')).toBeInTheDocument();
     expect(screen.getByText('Agenda')).toBeInTheDocument();
   });
 

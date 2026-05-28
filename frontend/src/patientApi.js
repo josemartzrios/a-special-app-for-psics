@@ -172,3 +172,10 @@ export async function acknowledgeBookingCancellation(slotId) {
     method: 'POST'
   })
 }
+
+export async function explainText(selectedText, context) {
+  return patientFetch('/portal/explain', {
+    method: 'POST',
+    body: JSON.stringify({ selected_text: selectedText, context })
+  })
+}
