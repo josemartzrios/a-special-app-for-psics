@@ -63,11 +63,14 @@ export default function Privacidad() {
             <h2 className="font-semibold text-ink text-base mb-2">5. Transferencias de datos</h2>
             <p>
               Para proveer el servicio, SyqueX comparte datos con: (a) Stripe
-              Inc., para el procesamiento de pagos; (b) Anthropic PBC, para la
-              generación de notas clínicas — los textos de dictado se envían a
-              Anthropic vía API para su procesamiento; Anthropic no almacena
-              estos datos según su política de uso de API. Ambos proveedores
-              cuentan con políticas de privacidad propias.
+              Inc., para el procesamiento de pagos; (b) Supabase Inc., que
+              actúa como proveedor de base de datos en la nube donde se
+              almacenan los datos de cuenta y los expedientes clínicos cifrados;
+              (c) Anthropic PBC, para la generación de notas clínicas — los
+              textos de dictado se envían a Anthropic vía API para su
+              procesamiento y no son utilizados para entrenar sus modelos según
+              su política de uso de API. Todos los proveedores cuentan con
+              políticas de privacidad propias.
             </p>
           </section>
 

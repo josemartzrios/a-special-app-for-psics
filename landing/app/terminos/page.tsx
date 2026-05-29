@@ -48,12 +48,9 @@ export default function Terminos() {
           <section>
             <h2 className="font-semibold text-ink text-base mb-2">4. Cancelación y reembolsos</h2>
             <p>
-              Puedes cancelar tu suscripción en cualquier momento enviando un
-              correo a{' '}
-              <a href="mailto:hola@syquex.mx" className="text-sage underline">
-                hola@syquex.mx
-              </a>
-              . Al cancelar, tu acceso continúa hasta el fin del período pagado
+              Puedes cancelar tu suscripción en cualquier momento directamente
+              desde tu cuenta con un clic, sin necesidad de contactar a soporte.
+              Al cancelar, tu acceso continúa hasta el fin del período pagado
               en curso. <strong className="text-ink">No se emiten reembolsos
                 por períodos parciales.</strong>
             </p>

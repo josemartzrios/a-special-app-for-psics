@@ -6,7 +6,7 @@ const faqs = [
   {
     question: '¿Dónde se almacenan los datos de mis pacientes?',
     answer:
-      'Los datos de tus pacientes se almacenan en Supabase, una plataforma de base de datos en la nube con cifrado en reposo y en tránsito (AES-256). Para la generación de notas utilizamos la API de Anthropic bajo un contrato de procesamiento de datos (DPA) que prohíbe explícitamente usar tu información para entrenar modelos de IA. Operamos bajo los lineamientos de la LFPDPPP y nunca compartimos datos con terceros.',
+      'Los datos de tus pacientes se almacenan en Supabase, una plataforma de base de datos en la nube con cifrado en reposo y en tránsito. Los campos sensibles del expediente se cifran individualmente con Fernet (AES-128-CBC + HMAC-SHA256) antes de guardarse en la base de datos. Para la generación de notas utilizamos la API de Anthropic, que según su política de uso de API no utiliza los datos enviados vía API para entrenar sus modelos. Operamos bajo los lineamientos de la LFPDPPP y nunca compartimos datos con terceros.',
   },
   {
     question: '¿SyqueX cumple con la NOM-004-SSA3?',
