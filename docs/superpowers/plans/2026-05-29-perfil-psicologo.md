@@ -30,6 +30,71 @@
 
 ---
 
+## Principios de diseño aplicados (`skills/best-practices.md`)
+
+### S — Single Responsibility
+
+**Backend:**
+- `GET /auth/me` solo lee campos del objeto `psychologist` y los retorna — sin lógica de negocio.
+- `POST /billing/setup-intent` solo crea el intent en Stripe — no toca DB ni modifica estado.
+- El handler `setup_intent.succeeded` en el webhook solo actualiza el default PM — no mezcla con otros eventos.
+- La extensión de `GET /billing/status` encapsula el fetch de Stripe en un `try/except` interno; si falla, el status se retorna igual — no contiene lógica de presentación.
+
+**Frontend:**
+- `ProfileScreen.jsx` se descompone en tres sub-componentes de presentación pura: `FieldRow` (un campo), `PlanBadge` (badge de estado), `PaymentChip` (chip de tarjeta). Cada uno recibe solo los props que necesita.
+- `UpdateCardModal.jsx` separa `CardForm` (lógica del form + Stripe) y `SuccessState` (estado final) — dos responsabilidades distintas en dos componentes distintos.
+
+### O — Open/Closed
+
+- `GET /auth/me` es un endpoint nuevo — no modifica la lógica de login/register existente.
+- `payment_method` se añade al bloque `active` de `billing/status` sin alterar las ramas `trialing`, `past_due`, `canceled`.
+- El webhook añade `elif event.type == "setup_intent.succeeded"` como una rama nueva — no toca los handlers existentes de `checkout.session.completed`, `invoice.*`, ni `customer.subscription.*`.
+
+### I — Interface Segregation
+
+- `ProfileScreen` no recibe props de `App.jsx` — fetcha su propio estado. `App.jsx` no necesita saber qué datos necesita el perfil.
+- `UpdateCardModal` expone solo tres props: `open`, `onClose`, `onSuccess`. No recibe el estado de billing ni el perfil.
+- `FieldRow`, `PlanBadge`, `PaymentChip` reciben solo los datos que renderizan — sin acceso al objeto completo.
+
+### D — Dependency Inversion
+
+- `GET /auth/me` y `POST /billing/setup-intent` dependen de `get_current_psychologist` via `Depends()` — no instancian ni consultan la sesión de DB directamente.
+- `UpdateCardModal` depende de `createSetupIntent` de `api.js` (abstracción HTTP), no de `fetch` directamente. En tests, se reemplaza con `vi.mock('../api')`.
+- Los tests usan `dependency_overrides[get_current_psychologist]` para inyectar mocks — funciona porque la dependencia es una abstracción, no una implementación concreta.
+
+### Guard Clause (Early Return)
+
+`create_setup_intent` valida al inicio y retorna 400 si no hay `stripe_customer_id` — la lógica principal de Stripe no está anidada en un `if`:
+
+```python
+# Bien — guard clause
+if not psychologist.stripe_customer_id:
+    raise HTTPException(status_code=400, detail="...")
+setup_intent = stripe.SetupIntent.create(...)  # sin anidamiento
+```
+
+### Nombres que revelan intención
+
+- `handleCardSuccess` — deja claro que se ejecuta al confirmar exitosamente una tarjeta, no al cerrar el modal.
+- `canChangeCard` — booleano que expresa la condición de negocio (`status === 'active'`), no un valor literal disperso.
+- `showNextBilling` — idem, agrupa tres condiciones en un nombre legible.
+- `loadingSecret` — distingue el loading del SetupIntent del loading general del componente.
+
+### Tests: un assert por concepto
+
+Cada test del plan verifica un solo comportamiento observable:
+
+```python
+# Bien — un test, un concepto
+def test_get_me_null_cedula():
+    ...
+    assert resp.json()["cedula_profesional"] is None
+
+# No mezclamos con: status code, name, email en el mismo test
+```
+
+---
+
 ## Task 0: Feature branch + instalar paquetes Stripe
 
 **Files:**
