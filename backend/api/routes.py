@@ -17,11 +17,12 @@ from database import get_db, Patient, Session, ClinicalNote, PatientProfile, Psy
 from config import settings
 import json as _json
 from crypto import encrypt_if_set, decrypt_if_set
-from agent import process_session, update_patient_profile_summary, process_session_custom
+from agent import process_session, update_patient_profile_summary, process_session_custom, sanitize_dictation
+from services.note_service import build_note
 from agent.tools import generate_evolution_report, search_patient_history
 from agent.embeddings import get_embedding, ZERO_VECTOR
 from api.limiter import limiter
-from exceptions import InvalidUUIDError, SessionNotFoundError, PatientNotFoundError, UnauthorizedAccessError
+from exceptions import InvalidUUIDError, SessionNotFoundError, PatientNotFoundError, UnauthorizedAccessError, PromptInjectionError
 from api.auth import get_current_psychologist, get_current_psychologist_sse
 from api.audit import log_audit
 
@@ -740,9 +741,11 @@ async def process_session_endpoint(
     db: AsyncSession = Depends(get_db_with_user),
 ):
     patient = await _get_owned_patient(db, psychologist.id, patient_id)
-    
-    # 1. Prompt Injection check (basic)
-    if "ignore previous instructions" in rec.raw_dictation.lower():
+
+    # 1. Prompt injection check — delegates to the agent's comprehensive regex
+    try:
+        sanitize_dictation(rec.raw_dictation)
+    except PromptInjectionError:
         raise HTTPException(status_code=422, detail="Contenido no permitido en el dictado.")
 
     # 2. Fetch template fields if format is custom
@@ -879,97 +882,19 @@ async def confirm_session(
         )
 
     note_data = req.edited_note or {}
-    note_format = note_data.get("format", "SOAP")
-    custom_fields_data = note_data.get("custom_fields") if req.edited_note else None
+    # Capture patient_id before commit — attribute expires after commit
+    patient_id = sess.patient_id
 
-    if note_format == "custom":
-        # Ensure custom_fields is never None — fall back to empty dict
-        custom_fields_data = custom_fields_data if custom_fields_data is not None else {}
-        text_for_embedding = note_data.get("text_fallback", "")
-        try:
-            embedding = await get_embedding(text_for_embedding) if text_for_embedding else ZERO_VECTOR
-        except Exception:
-            embedding = ZERO_VECTOR
-
-        # Snapshot the template at confirm time so history always renders correctly
-        # even if the psychologist later modifies their template (which would change field IDs).
-        tmpl_snapshot = None
-        try:
-            tmpl_res = await db.execute(
-                select(NoteTemplate).where(NoteTemplate.psychologist_id == psychologist.id)
-            )
-            tmpl = tmpl_res.scalar_one_or_none()
-            if tmpl and tmpl.fields:
-                tmpl_snapshot = tmpl.fields
-        except Exception:
-            pass
-
-        note = ClinicalNote(
-            session_id=sess.id,
-            format="custom",
-            custom_fields=custom_fields_data,
-            template_snapshot=tmpl_snapshot,
-            detected_patterns=note_data.get("detected_patterns", []),
-            alerts=note_data.get("alerts", []),
-            suggested_next_steps=note_data.get("suggested_next_steps", []),
-            evolution_delta=note_data.get("evolution_delta"),
-            embedding=embedding,
-        )
-        db.add(note)
-        sess.status = "confirmed"
-        try:
-            await db.commit()
-        except IntegrityError:
-            await db.rollback()
-            from exceptions import DomainError
-            raise DomainError(
-                "Esta sesión ya fue confirmada.",
-                code="DUPLICATE_NOTE",
-                http_status=409,
-            )
-        await db.refresh(note)
-
-        ai_response_text = decrypt_if_set(sess.ai_response) or ""
-        summary_data = {
-            "text_fallback": ai_response_text,
-            "detected_patterns": note_data.get("detected_patterns", []),
-            "alerts": note_data.get("alerts", []),
-            "suggested_next_steps": note_data.get("suggested_next_steps", []),
-        }
-        background_tasks.add_task(_background_update_profile, sess.patient_id, summary_data)
-
-        return ConfirmNoteOut(id=note.id)
-
-    sess.status = "confirmed"
-    structured = note_data.get("structured_note", {})
-
-    # Read ai_response before commit (attribute expires after commit)
-    ai_response_text = decrypt_if_set(sess.ai_response) or ""
-
-    # 1. Embedding del texto plano ANTES de cifrar
-    text_to_embed = " ".join([str(v) for v in structured.values() if v])
-    try:
-        embedding = await get_embedding(text_to_embed)
-    except Exception as e:
-        logger.warning("Embedding failed for session %s, using zero vector fallback: %s", session_id, e)
-        embedding = ZERO_VECTOR
-
-    # 2. Cifrar campos SOAP
-    cn = ClinicalNote(
-        session_id=sess.id,
-        format=note_data.get("format", "SOAP"),
-        subjective=encrypt_if_set(structured.get("subjective")),
-        objective=encrypt_if_set(structured.get("objective")),
-        assessment=encrypt_if_set(structured.get("assessment")),
-        plan=encrypt_if_set(structured.get("plan")),
-        data_field=encrypt_if_set(structured.get("data_field")),
-        detected_patterns=note_data.get("detected_patterns", []),
-        alerts=note_data.get("alerts", []),
-        suggested_next_steps=note_data.get("suggested_next_steps", []),
-        evolution_delta=note_data.get("evolution_delta", {}),
-        embedding=embedding,
+    note, summary_data = await build_note(
+        sess,
+        note_data,
+        psychologist_id=psychologist.id,
+        db=db,
+        session_id=session_id,
     )
-    db.add(cn)
+
+    db.add(note)
+    sess.status = "confirmed"
     try:
         await db.commit()
     except IntegrityError:
@@ -981,16 +906,8 @@ async def confirm_session(
             http_status=409,
         )
 
-    # 3. Actualizar perfil del paciente en background
-    summary_data = {
-        "text_fallback": ai_response_text,
-        "detected_patterns": note_data.get("detected_patterns", []),
-        "alerts": note_data.get("alerts", []),
-        "suggested_next_steps": note_data.get("suggested_next_steps", []),
-    }
-    background_tasks.add_task(_background_update_profile, sess.patient_id, summary_data)
-
-    return ConfirmNoteOut(id=cn.id)
+    background_tasks.add_task(_background_update_profile, patient_id, summary_data)
+    return ConfirmNoteOut(id=note.id)
 
 
 @router.delete("/sessions/{session_id}", status_code=204, tags=["sessions"])

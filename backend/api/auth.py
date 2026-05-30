@@ -25,40 +25,17 @@ import stripe
 from config import settings
 from exceptions import DomainError
 from database import get_db, Psychologist, Subscription, AuditLog, RefreshToken, PasswordResetToken
+from services.password import validate_password, hash_token, hash_password, verify_password
 
 import asyncio
 import hashlib
 import random
 import secrets
-import re
 from datetime import timezone
 
 from api.limiter import limiter
 
 UTC = timezone.utc
-
-# --- Validación de contraseña ---
-_PASSWORD_MIN_LENGTH = 8
-_PASSWORD_UPPERCASE_RE = re.compile(r'[A-Z]')
-_PASSWORD_NUMBER_RE = re.compile(r'[0-9]')
-
-def validate_password(password: str) -> str:
-    """Valida política de contraseña. Retorna el password si es válido, lanza ValueError si no."""
-    errors = []
-    if len(password) < _PASSWORD_MIN_LENGTH:
-        errors.append(f"Mínimo {_PASSWORD_MIN_LENGTH} caracteres")
-    if not _PASSWORD_UPPERCASE_RE.search(password):
-        errors.append("Al menos 1 letra mayúscula")
-    if not _PASSWORD_NUMBER_RE.search(password):
-        errors.append("Al menos 1 número")
-    if errors:
-        raise ValueError("; ".join(errors))
-    return password
-
-def hash_token(token: str) -> str:
-    """Retorna SHA-256 hash de un token."""
-    import hashlib
-    return hashlib.sha256(token.encode()).hexdigest()
 
 # --- Schema de registro ---
 class RegisterRequest(BaseModel):
@@ -101,14 +78,6 @@ logger = logging.getLogger("syquex.auth")
 # Crypto helpers
 # ---------------------------------------------------------------------------
 
-_pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=12)
-
-def hash_password(password: str) -> str:
-    return _pwd_context.hash(password)
-
-def verify_password(plain: str, hashed: str) -> bool:
-    return _pwd_context.verify(plain, hashed)
-
 def create_access_token(psychologist_id: str) -> str:
     expire = datetime.now(UTC) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     payload = {
@@ -119,16 +88,12 @@ def create_access_token(psychologist_id: str) -> str:
     }
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
-def _hash_token(raw_token: str) -> str:
-    """SHA-256 del token. Nunca almacenar el token raw."""
-    return hashlib.sha256(raw_token.encode()).hexdigest()
-
 def _create_refresh_token_record(psychologist_id, request: Request) -> tuple[str, RefreshToken]:
     """Genera token raw + registro para DB. Retorna (raw_token, db_record)."""
     raw = secrets.token_urlsafe(32)
     record = RefreshToken(
         psychologist_id=psychologist_id,
-        token_hash=_hash_token(raw),
+        token_hash=hash_token(raw),
         expires_at=datetime.now(UTC) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
         ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
@@ -376,7 +341,7 @@ async def refresh_token(
     if not raw_token:
         raise HTTPException(status_code=401, detail="No refresh token")
 
-    token_hash = _hash_token(raw_token)
+    token_hash = hash_token(raw_token)
     result = await db.execute(
         select(RefreshToken).where(RefreshToken.token_hash == token_hash)
     )
@@ -416,7 +381,7 @@ async def logout(
 ):
     raw_token = request.cookies.get("refresh_token")
     if raw_token:
-        token_hash = _hash_token(raw_token)
+        token_hash = hash_token(raw_token)
         result = await db.execute(
             select(RefreshToken).where(RefreshToken.token_hash == token_hash)
         )
@@ -479,7 +444,7 @@ async def forgot_password(
         raw_token = secrets.token_urlsafe(32)
         reset_record = PasswordResetToken(
             psychologist_id=psychologist.id,
-            token_hash=_hash_token(raw_token),
+            token_hash=hash_token(raw_token),
             expires_at=datetime.now(UTC) + timedelta(minutes=_PASSWORD_RESET_TOKEN_EXPIRE_MINUTES),
             ip_address=request.client.host if request.client else None,
         )
@@ -509,7 +474,7 @@ async def reset_password(
     body: ResetPasswordRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    token_hash = _hash_token(body.token)
+    token_hash = hash_token(body.token)
     res = await db.execute(
         select(PasswordResetToken).where(PasswordResetToken.token_hash == token_hash)
     )

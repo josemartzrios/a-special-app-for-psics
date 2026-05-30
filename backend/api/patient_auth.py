@@ -14,7 +14,8 @@ import secrets
 import asyncio
 import random
 from collections import defaultdict
-from api.auth import validate_password, hash_token, get_current_psychologist, hash_password, verify_password
+from services.password import validate_password, hash_token, hash_password, verify_password
+from api.auth import get_current_psychologist
 
 router = APIRouter()
 

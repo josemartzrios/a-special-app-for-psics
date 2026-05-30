@@ -102,7 +102,10 @@ class TestAvailabilityCancelledBooking:
         cancelled_result = MagicMock()
         cancelled_result.scalar_one_or_none.return_value = mock_cancelled_slot
 
-        mock_db.execute.side_effect = [available_result, upcoming_result, cancelled_result]
+        future_result = MagicMock()
+        future_result.scalar_one_or_none.return_value = None
+
+        mock_db.execute.side_effect = [available_result, upcoming_result, cancelled_result, future_result]
 
         from main import app
         from api.patient_portal import get_current_patient
@@ -149,7 +152,10 @@ class TestAvailabilityCancelledBooking:
         cancelled_result = MagicMock()
         cancelled_result.scalar_one_or_none.return_value = None
 
-        mock_db.execute.side_effect = [available_result, upcoming_result, cancelled_result]
+        future_result = MagicMock()
+        future_result.scalar_one_or_none.return_value = None
+
+        mock_db.execute.side_effect = [available_result, upcoming_result, cancelled_result, future_result]
 
         from main import app
         from api.patient_portal import get_current_patient
