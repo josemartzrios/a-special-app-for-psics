@@ -291,7 +291,7 @@ export default function NoteConfigurator({ initialFields = [], onSave, onCancel,
         <button
           onClick={handleSave}
           disabled={!canSave || saving}
-          className={`px-5 py-2 rounded-xl text-[13px] font-medium text-white transition-all ${
+          className={`px-5 py-2 rounded-xl text-[13px] font-medium text-white transition-[opacity,background-color,box-shadow] duration-150 ${
             !canSave || saving
               ? 'bg-[#5a9e8a] opacity-40 cursor-not-allowed'
               : 'bg-[#5a9e8a] hover:bg-[#4a8a78] shadow-sm'
