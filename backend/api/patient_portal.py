@@ -17,6 +17,29 @@ from services.email import send_booking_confirmation, send_booking_cancellation
 router = APIRouter(tags=["patient-portal"])
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/patient/login")
 
+
+def _summary_list_item(s: PatientSummary) -> dict:
+    return {
+        "id": str(s.id),
+        "session_id": str(s.session_id),
+        "sent_at": s.sent_at,
+        "viewed_at": s.viewed_at,
+        "next_session_date": s.next_session_date,
+        "topics_worked": decrypt_if_set(s.topics_worked),
+    }
+
+
+def _summary_detail_out(s: PatientSummary) -> dict:
+    return {
+        "id": str(s.id),
+        "session_id": str(s.session_id),
+        "topics_worked": decrypt_if_set(s.topics_worked),
+        "homework": decrypt_if_set(s.homework),
+        "next_session_date": s.next_session_date,
+        "sent_at": s.sent_at,
+        "viewed_at": s.viewed_at,
+    }
+
 async def get_current_patient(token: str = Depends(oauth2_scheme)) -> str:
     credentials_exc = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -43,17 +66,7 @@ async def list_summaries(patient_id: str = Depends(get_current_patient), db: Asy
     )
     summaries = res.scalars().all()
     
-    return [
-        {
-            "id": str(s.id),
-            "session_id": str(s.session_id),
-            "sent_at": s.sent_at,
-            "viewed_at": s.viewed_at,
-            "next_session_date": s.next_session_date,
-            "topics_worked": decrypt_if_set(s.topics_worked),
-        }
-        for s in summaries
-    ]
+    return [_summary_list_item(s) for s in summaries]
 
 @router.get("/summaries/{summary_id}")
 async def get_summary(summary_id: str, patient_id: str = Depends(get_current_patient), db: AsyncSession = Depends(get_db)):
@@ -73,16 +86,8 @@ async def get_summary(summary_id: str, patient_id: str = Depends(get_current_pat
         summary.viewed_at = datetime.now(timezone.utc)
         await db.commit()
         await db.refresh(summary)
-        
-    return {
-        "id": str(summary.id),
-        "session_id": str(summary.session_id),
-        "topics_worked": decrypt_if_set(summary.topics_worked),
-        "homework": decrypt_if_set(summary.homework),
-        "next_session_date": summary.next_session_date,
-        "sent_at": summary.sent_at,
-        "viewed_at": summary.viewed_at,
-    }
+
+    return _summary_detail_out(summary)
 
 
 @router.get("/availability")

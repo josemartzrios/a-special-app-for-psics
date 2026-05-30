@@ -137,7 +137,7 @@ export default function PatientInviteAccept({ inviteToken, setScreen }) {
               disabled={loading}
               className="w-full bg-[#5a9e8a] hover:bg-[#4a8a78] active:scale-[0.98] text-white rounded-xl py-2.5 text-[14px] font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed mt-2"
             >
-              {loading ? 'Creando cuenta…' : 'Activar cuenta →'}
+              {loading ? 'Creando cuenta…' : 'Activar cuenta'}
             </button>
           </form>
 

@@ -44,6 +44,10 @@ def _sanitizar_dictado(texto: str) -> str:
         )
     return texto[:settings.MAX_DICTATION_LENGTH].strip()
 
+
+# Public alias — use this at API boundaries to avoid duplicating injection logic
+sanitize_dictation = _sanitizar_dictado
+
 _SHARED_RULES = """
 REGLAS FUNDAMENTALES Y DE SEGURIDAD (CRÍTICAS):
 
