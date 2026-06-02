@@ -8,7 +8,7 @@
 
 ## Resumen
 
-Añadir una sección "Mi Perfil" a la app del psicólogo, accesible desde un nuevo tab en la navegación (BottomNav móvil + botón en sidebar desktop). Muestra datos personales de solo lectura y el estado de suscripción, con un modal embebido de Stripe para cambiar el método de pago sin salir de la app.
+Añadir una sección "Mi Perfil" a la app del psicólogo, accesible desde un nuevo tab en la navegación (BottomNav móvil + botón en sidebar desktop). Muestra datos personales de solo lectura y el estado de suscripción, con un modal embebido de Stripe para cambiar el método de pago sin salir de la app. Incluye también un botón inline para iniciar el flujo de cambio de contraseña por email, reutilizando el endpoint y pantallas ya existentes.
 
 ---
 
@@ -44,6 +44,23 @@ Campos de solo lectura. Todos los valores llegan de `GET /auth/me`.
 | Cédula profesional | `cedula_profesional` (si null → "No registrada" en gris) |
 
 Ícono de la card: persona, color sage.
+
+### Cambiar contraseña (dentro de Card 1)
+
+Debajo del campo cédula profesional, un botón ghost `"Cambiar contraseña"` con ícono de candado.
+
+**Flujo:** El email del psicólogo ya está cargado desde `GET /auth/me`. Click → llama `forgotPassword(profile.email)` (función existente en `api.js`) → el psicólogo recibe un email con link → abre `ResetPasswordScreen.jsx` ya existente para completar el cambio.
+
+**Estados del botón:**
+
+| Estado | UI |
+|--------|----|
+| `idle` | "Cambiar contraseña", ícono candado, `text-ink-secondary` ghost |
+| `sending` | "Enviando…" deshabilitado, spinner inline |
+| `sent` | Checkmark sage + "Enlace enviado a {email}" — reemplaza el botón hasta que el psicólogo recargue la página |
+| `error` | Mensaje de error rojo inline, botón re-habilitado |
+
+El backend ya rate-limita a 1 solicitud por email cada 10 minutos. El estado `sent` en la UI previene doble-tap. No se requiere ningún endpoint ni función de `api.js` nuevos.
 
 ### Card 2 — Suscripción y pago
 Datos de `GET /billing/status` (ya existente) + campo nuevo `payment_method` que devuelve `{ brand, last4 }` cuando hay tarjeta registrada.
@@ -220,6 +237,8 @@ npm install @stripe/react-stripe-js @stripe/stripe-js
 
 ### Frontend
 - `ProfileScreen.test.jsx`: renderiza los dos cards, muestra datos del mock de `/auth/me` y `/billing/status`
+- `ProfileScreen.test.jsx`: botón "Cambiar contraseña" llama `forgotPassword` con el email del perfil y pasa a estado `sent`
+- `ProfileScreen.test.jsx`: estado `sent` muestra mensaje de confirmación con el email, no el botón
 - `UpdateCardModal.test.jsx`: renderiza en estado loading → idle; cierra con Escape; botón "Cancelar" cierra; muestra estado success
 - `BottomNav.test.jsx`: tab "Perfil" presente y activo cuando `activeSection === 'profile'`
 
@@ -229,5 +248,4 @@ npm install @stripe/react-stripe-js @stripe/stripe-js
 
 - Edición de datos personales (nombre, cédula) — solo lectura en esta iteración
 - Cambio de email — requiere flujo de verificación separado
-- Cambio de contraseña — pantalla separada futura
 - Historial de facturas — disponible en Stripe Customer Portal si se necesita en el futuro
