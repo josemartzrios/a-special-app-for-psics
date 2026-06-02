@@ -40,7 +40,10 @@ def _summary_detail_out(s: PatientSummary) -> dict:
         "viewed_at": s.viewed_at,
     }
 
-async def get_current_patient(token: str = Depends(oauth2_scheme)) -> str:
+async def get_current_patient(
+    token: str = Depends(oauth2_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> str:
     credentials_exc = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Token inválido o sesión expirada",
@@ -49,12 +52,23 @@ async def get_current_patient(token: str = Depends(oauth2_scheme)) -> str:
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         role = payload.get("role")
-        patient_id = payload.get("patient_id")
-        if role != "patient" or not patient_id:
+        patient_user_id = payload.get("sub")
+        if role != "patient" or not patient_user_id:
             raise credentials_exc
-        return patient_id
     except Exception:
         raise credentials_exc
+
+    from database import PatientUser as _PatientUser
+    result = await db.execute(
+        select(_PatientUser).where(
+            _PatientUser.id == uuid.UUID(patient_user_id),
+            _PatientUser.is_active == True,
+        )
+    )
+    patient_user = result.scalar_one_or_none()
+    if not patient_user:
+        raise credentials_exc
+    return str(patient_user.patient_id)
 
 @router.get("/summaries")
 async def list_summaries(patient_id: str = Depends(get_current_patient), db: AsyncSession = Depends(get_db)):
