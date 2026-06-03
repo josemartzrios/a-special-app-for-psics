@@ -1,6 +1,6 @@
 # SyqueX — System Architecture Document
 
-> **Version:** 1.0.0 · **Last Updated:** 2026-04-16 · **Status:** Pre-Production  
+> **Version:** 1.1.0 · **Last Updated:** 2026-06-02 · **Status:** Pre-Production  
 > **Classification:** Internal Engineering · **Audience:** Engineering, DevOps, Security Auditors
 
 ---
@@ -92,9 +92,14 @@ graph TB
 ```mermaid
 graph LR
     subgraph "HTTP Layer"
-        main["main.py<br/>FastAPI app + middleware"]
-        auth["api/auth.py<br/>JWT + registration"]
+        main["main.py<br/>FastAPI app + middleware + job worker"]
+        auth["api/auth.py<br/>JWT + registration (psicólogos)"]
+        patient_auth["api/patient_auth.py<br/>Portal auth (pacientes)"]
         routes["api/routes.py<br/>Clinical endpoints"]
+        patient_portal["api/patient_portal.py<br/>Portal del paciente"]
+        calendar["api/calendar_routes.py<br/>Slots de disponibilidad"]
+        calendar_ai["api/calendar_ai.py<br/>Calendar AI logic"]
+        summary["api/summary_routes.py<br/>Resúmenes para paciente"]
         billing["api/billing.py<br/>Stripe integration"]
         privacy["api/privacy.py<br/>Data export LFPDPPP"]
         cron["api/cron.py<br/>Scheduled jobs"]
@@ -105,58 +110,101 @@ graph LR
     subgraph "Agent Layer"
         agent["agent/agent.py<br/>Claude orchestration"]
         tools["agent/tools.py<br/>Tool schemas + impls"]
+        template_tool["agent/template_tool.py<br/>Custom note tool builder"]
         embeddings["agent/embeddings.py<br/>FastEmbed service"]
         interfaces["agent/interfaces.py<br/>ABCs SOLID"]
+        worker["agent/worker.py<br/>Background job worker"]
     end
 
     subgraph "Domain Layer"
         config["config.py<br/>Pydantic Settings"]
         exceptions["exceptions.py<br/>Domain errors"]
         database["database.py<br/>SQLAlchemy models + init"]
+        crypto["crypto.py<br/>Fernet encryption"]
     end
 
     subgraph "Services"
+        note_service["services/note_service.py<br/>Note strategy pattern"]
         email["services/email.py<br/>Resend transactional"]
+        password["services/password.py<br/>Password validation"]
     end
 
-    main --> auth & routes & billing & privacy & cron
-    auth --> config & database & email
-    routes --> agent & database & tools & embeddings
+    main --> auth & patient_auth & routes & patient_portal & calendar & summary & billing & privacy & cron
+    main --> worker
+    auth --> config & database & email & crypto
+    patient_auth --> database & crypto
+    routes --> agent & database & tools & embeddings & note_service
+    patient_portal --> database & email & calendar
+    calendar --> database & email
+    calendar_ai --> agent & database
+    summary --> database & email & agent
     billing --> auth & database
     privacy --> auth & database
     cron --> database & email
-    agent --> config & database & exceptions
+    agent --> config & database & exceptions & template_tool
     tools --> embeddings & database
+    template_tool --> tools
     embeddings --> interfaces
+    worker --> agent & database & crypto
     audit --> database
     routes --> limiter
     auth --> limiter
+    note_service --> database
 
     style main fill:#5a9e8a,stroke:#18181b,color:#fff
     style agent fill:#c4935a,stroke:#18181b,color:#fff
     style database fill:#635BFF,stroke:#18181b,color:#fff
+    style crypto fill:#c4935a,stroke:#18181b,color:#fff
+    style worker fill:#5a9e8a,stroke:#18181b,color:#fff
 ```
 
 ### 3.2 File Inventory
 
-| File | Lines | Role |
-|---|---|---|
-| `main.py` | 101 | App factory, CORS, security headers, error handlers, router mounting |
-| `config.py` | 49 | Pydantic-settings: DB URL, API keys, clinical limits, Stripe/Resend config |
-| `database.py` | 400 | 10 SQLAlchemy models, `init_db()` with idempotent migrations, pgvector HNSW index |
-| `exceptions.py` | 60 | Domain error hierarchy with HTTP status mapping |
-| `api/auth.py` | 526 | Register, login, refresh, logout, forgot/reset-password, brute-force protection |
-| `api/routes.py` | 475 | Patients CRUD, sessions process/confirm/archive, conversations, profiles, search |
-| `api/billing.py` | 130 | Stripe Checkout Sessions, webhook handler (idempotent), billing status |
-| `api/privacy.py` | 64 | LFPDPPP data export endpoint |
-| `api/cron.py` | 46 | Daily cron: trial-ending email notifications |
-| `api/audit.py` | 41 | Audit log insertion utility |
-| `api/limiter.py` | ~5 | slowapi Limiter singleton |
-| `agent/agent.py` | 271 | System prompts (SOAP + Chat), patient context builder, Claude API calls, prompt injection guard |
-| `agent/tools.py` | 169 | 5 tool schemas for Claude tool_use, semantic search implementation |
-| `agent/embeddings.py` | 44 | FastEmbed wrapper (multilingual-e5-large, 1024d), thread-safe lazy init |
-| `agent/interfaces.py` | 17 | `IEmbeddingService` and `BaseTool` ABCs |
-| `services/email.py` | 54 | Welcome, reset, trial-ending emails via Resend |
+**Raíz:**
+
+| File | Role |
+|---|---|
+| `main.py` | App factory, CORS + security headers, error handlers, router mounting, startup job worker |
+| `config.py` | Pydantic-settings: DB URL, API keys, clinical limits, Stripe/Resend config |
+| `database.py` | 17 SQLAlchemy models, `init_db()` con migraciones idempotentes, RLS, pgvector HNSW |
+| `exceptions.py` | Jerarquía de errores de dominio con HTTP status mapping |
+| `crypto.py` | Wrapper Fernet con rotación de llave — cifra campos sensibles en DB (LFPDPPP) |
+
+**`api/`:**
+
+| File | Role |
+|---|---|
+| `api/auth.py` | Register, login, refresh, logout, forgot/reset-password, brute-force protection (psicólogos) |
+| `api/patient_auth.py` | Login, refresh, reset-password para cuentas del portal del paciente |
+| `api/routes.py` | Patients CRUD, sessions process/confirm/archive, conversations, profiles, semantic search |
+| `api/patient_portal.py` | Portal del paciente: disponibilidad, reservas, resúmenes, cancelaciones |
+| `api/calendar_routes.py` | Gestión de slots de disponibilidad del psicólogo |
+| `api/calendar_ai.py` | Sugerencias de calendario asistidas por IA |
+| `api/summary_routes.py` | Crear, editar y enviar resúmenes de sesión al paciente |
+| `api/billing.py` | Stripe Checkout Sessions, webhook handler (idempotente), billing status |
+| `api/privacy.py` | LFPDPPP data export endpoint |
+| `api/cron.py` | Daily cron: trial-ending email notifications |
+| `api/audit.py` | Audit log insertion utility |
+| `api/limiter.py` | slowapi Limiter singleton |
+
+**`agent/`:**
+
+| File | Role |
+|---|---|
+| `agent/agent.py` | System prompts (SOAP + Chat), patient context builder, Claude API calls, prompt injection guard |
+| `agent/tools.py` | 5 tool schemas para Claude tool_use, semantic search implementation |
+| `agent/template_tool.py` | Construye dinámicamente la tool `fill_custom_note` desde la plantilla del psicólogo |
+| `agent/embeddings.py` | FastEmbed wrapper (multilingual-e5-large, 1024d), thread-safe lazy init |
+| `agent/interfaces.py` | `IEmbeddingService` y `BaseTool` ABCs |
+| `agent/worker.py` | Worker asíncrono: poll `job_queue` table, procesa dictados, escribe resultado cifrado |
+
+**`services/`:**
+
+| File | Role |
+|---|---|
+| `services/note_service.py` | Strategy pattern para construcción de notas clínicas (SOAP, DAP, BIRP, custom) |
+| `services/email.py` | Emails transaccionales vía Resend: bienvenida, reset, trial, ICS de citas |
+| `services/password.py` | Validación de política de contraseñas (mínimo 8 chars, mayúscula, número) |
 
 ### 3.3 Middleware Stack
 
@@ -351,7 +399,44 @@ sequenceDiagram
     API-->>Browser: access_token + new refresh_token
 ```
 
-### 5.3 Embedding and RAG Pipeline
+### 5.3 Background Job Queue (Async Note Processing)
+
+```mermaid
+sequenceDiagram
+    participant UI as React SPA
+    participant API as FastAPI
+    participant DB as PostgreSQL
+    participant Worker as agent/worker.py
+    participant Agent as agent.py
+    participant Claude as Anthropic Claude
+
+    UI->>API: POST /sessions/{patient_id}/process-soap
+    API->>DB: INSERT job_queue (status=pending, raw_dictation=encrypted)
+    API-->>UI: { job_id, status: "pending" }
+
+    Note over Worker: Poll every N seconds
+    Worker->>DB: SELECT job WHERE status=pending LIMIT 1
+    DB-->>Worker: job record
+    Worker->>DB: UPDATE job SET status=processing
+
+    Worker->>Agent: process_session(dictation, format, template_fields)
+    Agent->>Claude: messages.create() with context
+    Claude-->>Agent: structured note
+
+    Worker->>DB: UPDATE job SET status=completed, result=encrypted_json
+    
+    UI->>API: GET /sessions/job/{job_id}
+    API->>DB: SELECT job WHERE id=job_id
+    DB-->>API: completed job + result
+    API-->>UI: parsed note result
+```
+
+**Retry policy:** Max 3 attempts. Tras el tercer fallo el job queda en `failed` con `error_message`.  
+**Encryption:** `raw_dictation` y `result` se almacenan cifrados con Fernet (`crypto.py`) — nunca en claro en DB.
+
+---
+
+### 5.4 Embedding and RAG Pipeline
 
 ```mermaid
 graph LR
@@ -501,20 +586,19 @@ graph TB
 
 ## 8. Testing Infrastructure
 
-### 8.1 Backend Tests
+### 8.1 Backend Tests (37 archivos)
 
-| Test File | Coverage Area | Size |
-|---|---|---|
-| `tests/test_api_routes.py` | All clinical endpoints, pagination, UUID validation | ~39K |
-| `tests/test_auth_register.py` | Registration flow, email uniqueness, password policy | ~2.7K |
-| `tests/test_auth_refresh.py` | Token refresh, rotation, theft detection | ~672 |
-| `tests/test_auth_forgot_reset.py` | Password reset lifecycle | ~2.3K |
-| `tests/test_agent_process.py` | Agent orchestration, LLM mocking | ~19K |
-| `tests/test_agent_sanitize.py` | Prompt injection detection | ~4.5K |
-| `tests/test_agent_embeddings.py` | Embedding service, error handling | ~4.9K |
-| `tests/test_config.py` | Settings validation | ~3.4K |
-| `tests/test_exceptions.py` | Domain error hierarchy | ~4.9K |
-| `tests/test_health.py` | Health check endpoint | ~722 |
+| Área | Archivos clave |
+|---|---|
+| Clinical endpoints | `test_api_routes.py` — patients CRUD, sessions, notes, pagination, UUID validation |
+| Auth (psicólogos) | `test_auth_register.py`, `test_auth_refresh.py`, `test_auth_forgot_reset.py` |
+| Auth (pacientes) | `test_patient_auth_*.py`, `test_patient_portal_*.py` |
+| Agent / LLM | `test_agent_process.py`, `test_agent_sanitize.py`, `test_agent_embeddings.py` |
+| Custom templates | `test_template_*.py` — template creation, fill_custom_note tool |
+| Calendar | `test_calendar_*.py` — slots, booking, cancellation, .ics emails |
+| Billing | `test_billing.py` — Stripe webhook handling, idempotency |
+| Background jobs | `test_job_routes.py` — job creation, worker processing, status polling |
+| Infrastructure | `test_config.py`, `test_exceptions.py`, `test_health.py` |
 
 ### 8.2 Frontend Tests
 
@@ -546,11 +630,15 @@ graph TB
 
 ### B. Router Mounting Order
 ```python
-app.include_router(auth_router,    prefix="/api/v1")           # /api/v1/auth/*
-app.include_router(billing_router, prefix="/api/v1/billing")   # /api/v1/billing/*
-app.include_router(cron_router,    prefix="/api/v1/cron")      # /api/v1/cron/*
-app.include_router(privacy_router, prefix="/api/v1/privacy")   # /api/v1/privacy/*
-app.include_router(router,         prefix="/api/v1")           # /api/v1/* (clinical)
+app.include_router(auth_router,           prefix="/api/v1")                    # /api/v1/auth/*
+app.include_router(patient_auth_router,   prefix="/api/v1/auth/patient")       # /api/v1/auth/patient/*
+app.include_router(patient_portal_router, prefix="/api/v1/portal")             # /api/v1/portal/*
+app.include_router(billing_router,        prefix="/api/v1/billing")            # /api/v1/billing/*
+app.include_router(cron_router,           prefix="/api/v1/cron")               # /api/v1/cron/*
+app.include_router(privacy_router,        prefix="/api/v1/privacy")            # /api/v1/privacy/*
+app.include_router(calendar_router,       prefix="/api/v1/calendar")           # /api/v1/calendar/*
+app.include_router(summary_router,        prefix="/api/v1")                    # /api/v1/* (summaries)
+app.include_router(router,                prefix="/api/v1")                    # /api/v1/* (clinical)
 ```
 
 ### C. Clinical Configuration Defaults

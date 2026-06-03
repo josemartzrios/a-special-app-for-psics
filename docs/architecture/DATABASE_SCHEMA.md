@@ -1,6 +1,6 @@
 # SyqueX — Database Schema Reference
 
-> **Version:** 1.0.0 · **Engine:** PostgreSQL 16 · **Extensions:** pgvector  
+> **Version:** 1.1.0 · **Last Updated:** 2026-06-02 · **Engine:** PostgreSQL 16 · **Extensions:** pgvector  
 > **ORM:** SQLAlchemy 2.0 (async) · **Driver:** asyncpg
 
 ---
@@ -14,9 +14,14 @@ erDiagram
     psychologists ||--o{ refresh_tokens : "has many"
     psychologists ||--o{ password_reset_tokens : "has many"
     psychologists ||--o{ audit_logs : "has many"
+    psychologists ||--o| note_templates : "has one"
+    psychologists ||--o{ availability_slots : "has many"
     patients ||--o{ sessions : "has many"
     patients ||--o| patient_profiles : "has one"
+    patients ||--o| patient_users : "has one"
     sessions ||--o| clinical_notes : "has one"
+    sessions ||--o| patient_summaries : "has one"
+    patient_users ||--o{ patient_password_reset_tokens : "has many"
 
     psychologists {
         uuid id PK
@@ -32,8 +37,8 @@ erDiagram
         varchar terms_version
         timestamptz trial_ends_at
         varchar stripe_customer_id
-        timestamp created_at
-        timestamp updated_at
+        timestamptz created_at
+        timestamptz updated_at
     }
 
     patients {
@@ -43,9 +48,19 @@ erDiagram
         date date_of_birth
         text[] diagnosis_tags
         varchar risk_level
-        timestamp created_at
-        timestamp updated_at
-        timestamp deleted_at
+        varchar marital_status
+        varchar occupation
+        text address
+        text emergency_contact
+        text reason_for_consultation
+        text medical_history
+        text psychological_history
+        text gender_identity
+        text phone
+        varchar email
+        timestamptz created_at
+        timestamptz updated_at
+        timestamptz deleted_at
     }
 
     sessions {
@@ -58,9 +73,9 @@ erDiagram
         text ai_response
         varchar status
         boolean is_archived
-        jsonb messages
-        timestamp created_at
-        timestamp updated_at
+        text messages
+        timestamptz created_at
+        timestamptz updated_at
     }
 
     clinical_notes {
@@ -76,9 +91,11 @@ erDiagram
         text[] alerts
         text[] suggested_next_steps
         jsonb evolution_delta
+        jsonb custom_fields
+        jsonb template_snapshot
         vector_1024 embedding
-        timestamp created_at
-        timestamp updated_at
+        timestamptz created_at
+        timestamptz updated_at
     }
 
     patient_profiles {
@@ -89,7 +106,68 @@ erDiagram
         text[] risk_factors
         jsonb progress_indicators
         text patient_summary
-        timestamp updated_at
+        timestamptz updated_at
+    }
+
+    patient_users {
+        uuid id PK
+        uuid patient_id FK
+        uuid psychologist_id FK
+        varchar email UK
+        text password_hash
+        varchar invite_token
+        timestamptz invite_token_expires_at
+        timestamptz invited_at
+        timestamptz accepted_at
+        boolean is_active
+    }
+
+    patient_summaries {
+        uuid id PK
+        uuid session_id FK_UK
+        uuid patient_id FK
+        text ai_draft
+        text topics_worked
+        text homework
+        date next_session_date
+        timestamptz sent_at
+        timestamptz viewed_at
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    patient_password_reset_tokens {
+        uuid id PK
+        uuid patient_user_id FK
+        varchar token_hash UK
+        timestamptz expires_at
+        timestamptz used_at
+        integer failed_attempts
+        varchar ip_address
+        timestamptz created_at
+    }
+
+    note_templates {
+        uuid id PK
+        uuid psychologist_id FK_UK
+        jsonb fields
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    job_queue {
+        uuid id PK
+        uuid psychologist_id
+        uuid patient_id FK
+        varchar status
+        varchar format
+        text raw_dictation
+        jsonb template_fields
+        text result
+        text error_message
+        integer attempts
+        timestamptz created_at
+        timestamptz updated_at
     }
 
     subscriptions {
@@ -132,7 +210,7 @@ erDiagram
 
     audit_logs {
         uuid id PK
-        timestamp timestamp
+        timestamptz timestamp
         uuid psychologist_id
         varchar action
         varchar entity
@@ -148,9 +226,12 @@ erDiagram
         time start_time
         integer duration_minutes
         varchar status
-        uuid patient_id FK
+        uuid booked_by_patient_id FK
         timestamptz booked_at
+        varchar cancelled_by
+        boolean acknowledged
         timestamptz created_at
+        timestamptz updated_at
     }
 
     processed_stripe_events {
@@ -189,7 +270,7 @@ The user/tenant table. Each psychologist owns their patients and data.
 
 ### `patients`
 
-Patient records, scoped per psychologist.
+Patient records, scoped per psychologist. Campos de intake clínico cifrados con Fernet.
 
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
@@ -199,9 +280,19 @@ Patient records, scoped per psychologist.
 | `date_of_birth` | DATE | NULLABLE | |
 | `diagnosis_tags` | TEXT[] | default `[]` | Array of diagnostic labels |
 | `risk_level` | VARCHAR(20) | NOT NULL, CHECK `IN ('low','medium','high')` | |
-| `created_at` | TIMESTAMP | NOT NULL | |
-| `updated_at` | TIMESTAMP | NOT NULL | |
-| `deleted_at` | TIMESTAMP | NULLABLE | Soft delete for LFPDPPP compliance |
+| `marital_status` | VARCHAR(30) | NULLABLE | Estado civil |
+| `occupation` | VARCHAR(120) | NULLABLE | Ocupación |
+| `address` | TEXT | NULLABLE | Dirección |
+| `emergency_contact` | TEXT | NULLABLE | JSON cifrado `{name, relationship, phone}` |
+| `reason_for_consultation` | TEXT | NULLABLE | Motivo de consulta |
+| `medical_history` | TEXT | NULLABLE | Historial médico |
+| `psychological_history` | TEXT | NULLABLE | Historial psicológico previo |
+| `gender_identity` | TEXT | NULLABLE | Identidad de género |
+| `phone` | TEXT | NULLABLE | Teléfono |
+| `email` | VARCHAR(255) | NULLABLE | Para envío de resúmenes / invitación portal |
+| `created_at` | TIMESTAMPTZ | NOT NULL | |
+| `updated_at` | TIMESTAMPTZ | NOT NULL | |
+| `deleted_at` | TIMESTAMPTZ | NULLABLE | Soft delete LFPDPPP compliance |
 
 **Indexes:**
 - `idx_patients_psychologist_id` — lookup by owner
@@ -217,16 +308,16 @@ Raw dictation and AI response for each clinical encounter.
 |---|---|---|---|
 | `id` | UUID | PK | |
 | `patient_id` | UUID | FK → patients.id (RESTRICT) | |
-| `session_number` | INTEGER | NOT NULL | Auto-incremented per patient |
+| `session_number` | INTEGER | NULLABLE | Null para sesiones de chat libre |
 | `session_date` | DATE | NOT NULL | |
 | `raw_dictation` | TEXT | NOT NULL | Original clinician input |
-| `format` | VARCHAR(20) | NOT NULL, default `'SOAP'` | `SOAP`, `DAP`, `BIRP`, `chat` |
+| `format` | VARCHAR(20) | NOT NULL, default `'SOAP'` | `SOAP`, `DAP`, `BIRP`, `chat`, `custom` |
 | `ai_response` | TEXT | NULLABLE | Claude's raw text response |
 | `status` | VARCHAR(20) | NOT NULL, CHECK `IN ('draft','confirmed')` | |
 | `is_archived` | BOOLEAN | NOT NULL, default `false` | Soft-hide from UI |
-| `messages` | JSONB | NOT NULL, default `[]` | Full conversation turns `[{role, content}]` |
-| `created_at` | TIMESTAMP | NOT NULL | |
-| `updated_at` | TIMESTAMP | NOT NULL | |
+| `messages` | TEXT | NOT NULL, default `'[]'` | Turns cifrados `[{role, content}]` (Fernet) |
+| `created_at` | TIMESTAMPTZ | NOT NULL | |
+| `updated_at` | TIMESTAMPTZ | NOT NULL | |
 
 **Indexes:**
 - `idx_sessions_patient_id` — lookup by patient
@@ -254,9 +345,13 @@ Structured clinical notes with vector embeddings. One-to-one with sessions.
 | `alerts` | TEXT[] | default `[]` | Risk/safety alerts |
 | `suggested_next_steps` | TEXT[] | default `[]` | Therapeutic recommendations |
 | `evolution_delta` | JSONB | default `{}` | Change metrics from prior session |
+| `custom_fields` | JSONB | NULLABLE | Campos llenados para formato custom |
+| `template_snapshot` | JSONB | NULLABLE | Snapshot de la plantilla al momento de crear la nota (evita "Sin información" si el psicólogo modifica su template) |
 | `embedding` | VECTOR(1024) | NULLABLE | FastEmbed multilingual-e5-large |
-| `created_at` | TIMESTAMP | NOT NULL | |
-| `updated_at` | TIMESTAMP | NOT NULL | |
+| `created_at` | TIMESTAMPTZ | NOT NULL | |
+| `updated_at` | TIMESTAMPTZ | NOT NULL | |
+
+> **format CHECK:** `IN ('SOAP', 'DAP', 'BIRP', 'custom')`
 
 **Indexes:**
 - `clinical_notes_embedding_idx` — HNSW index for cosine distance (`vector_cosine_ops`)
@@ -293,14 +388,19 @@ Psychologist calendar slots for booking.
 | `psychologist_id` | UUID | FK → psychologists.id (CASCADE) | |
 | `slot_date` | DATE | NOT NULL | e.g. 2026-05-15 |
 | `start_time` | TIME | NOT NULL | e.g. 10:00 |
-| `duration_minutes` | INTEGER | NOT NULL | Default 50 |
+| `duration_minutes` | INTEGER | NOT NULL, CHECK `15 ≤ x ≤ 180`, default 60 | |
 | `status` | VARCHAR(20) | NOT NULL, CHECK `IN ('available','booked','cancelled')` | |
-| `patient_id` | UUID | FK → patients.id (SET NULL) | |
+| `booked_by_patient_id` | UUID | FK → patients.id (SET NULL) | |
 | `booked_at` | TIMESTAMPTZ | NULLABLE | |
+| `cancelled_by` | VARCHAR(20) | NULLABLE | `'psychologist'` o `'patient'` |
+| `acknowledged` | BOOLEAN | NOT NULL, default `false` | Psicólogo confirmó la cancelación en UI |
 | `created_at` | TIMESTAMPTZ | NOT NULL | |
+| `updated_at` | TIMESTAMPTZ | NOT NULL | |
 
 **Indexes:**
-- `idx_availability_slots_psychologist_date` — lookup by date
+- `idx_slots_psychologist_date` — lookup por psicólogo + fecha
+- `idx_slots_psychologist_status` — lookup por psicólogo + estado
+- `idx_slots_booked_patient` — lookup por paciente
 - `uq_psychologist_slot` — UNIQUE (psychologist_id, slot_date, start_time)
 
 ---
@@ -388,6 +488,122 @@ Immutable audit trail for LFPDPPP compliance.
 - `idx_audit_logs_entity`
 - `idx_audit_logs_action`
 - `idx_audit_logs_psych_timestamp` — composite for querying actions per user in a time range
+
+---
+
+### `patient_users`
+
+Cuentas de pacientes para el portal del paciente.
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `id` | UUID | PK | |
+| `patient_id` | UUID | FK → patients.id (CASCADE) | |
+| `psychologist_id` | UUID | FK → psychologists.id | |
+| `email` | VARCHAR(255) | UNIQUE, NOT NULL | Login del paciente |
+| `password_hash` | TEXT | NULLABLE | Null hasta que el paciente acepta la invitación |
+| `invite_token` | VARCHAR(255) | NULLABLE, indexed | Token one-time de aceptación (7 días) |
+| `invite_token_expires_at` | TIMESTAMPTZ | NULLABLE | |
+| `invited_at` | TIMESTAMPTZ | NOT NULL | Cuando se envió la invitación |
+| `accepted_at` | TIMESTAMPTZ | NULLABLE | Cuando el paciente creó su contraseña |
+| `is_active` | BOOLEAN | NOT NULL, default `false` | Se activa al aceptar la invitación |
+
+**Indexes:**
+- `idx_patient_users_patient` — lookup by patient_id
+- `idx_patient_users_psychologist` — lookup by psychologist_id
+- UNIQUE on `email`
+- Index on `invite_token`
+
+---
+
+### `patient_summaries`
+
+Resúmenes de sesión generados por IA y enviados al portal del paciente.
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `id` | UUID | PK | |
+| `session_id` | UUID | FK → sessions.id (CASCADE), UNIQUE | Un resumen por sesión |
+| `patient_id` | UUID | FK → patients.id | |
+| `ai_draft` | TEXT | NULLABLE | Borrador generado por Claude |
+| `topics_worked` | TEXT | NULLABLE | Temas trabajados en la sesión |
+| `homework` | TEXT | NULLABLE | Tareas asignadas al paciente |
+| `next_session_date` | DATE | NULLABLE | Fecha de la próxima cita |
+| `sent_at` | TIMESTAMPTZ | NULLABLE | Cuándo se envió al paciente |
+| `viewed_at` | TIMESTAMPTZ | NULLABLE | Cuándo lo vio el paciente |
+| `created_at` | TIMESTAMPTZ | NOT NULL | |
+| `updated_at` | TIMESTAMPTZ | NOT NULL | |
+
+**Indexes:**
+- `idx_patient_summaries_patient` — lookup by patient
+- `idx_patient_summaries_session` — lookup by session
+
+---
+
+### `patient_password_reset_tokens`
+
+Tokens one-time para reset de contraseña de cuentas de pacientes.
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `id` | UUID | PK | |
+| `patient_user_id` | UUID | FK → patient_users.id (CASCADE) | |
+| `token_hash` | VARCHAR(64) | UNIQUE | SHA-256 del token raw |
+| `expires_at` | TIMESTAMPTZ | NOT NULL | TTL 60 minutos |
+| `used_at` | TIMESTAMPTZ | NULLABLE | Set al usar el token |
+| `failed_attempts` | INTEGER | NOT NULL, default `0` | Máx 3, luego bloqueado |
+| `ip_address` | VARCHAR(45) | NULLABLE | |
+| `created_at` | TIMESTAMPTZ | NOT NULL | |
+
+**Indexes:**
+- `idx_patient_password_reset_tokens_hash`
+
+---
+
+### `note_templates`
+
+Plantillas de nota clínica personalizadas por psicólogo.
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `id` | UUID | PK | |
+| `psychologist_id` | UUID | FK → psychologists.id (CASCADE), UNIQUE | Una plantilla por psicólogo |
+| `fields` | JSONB | NOT NULL, default `[]` | Array de campos: `{id, label, type, required}` |
+| `created_at` | TIMESTAMPTZ | NOT NULL | |
+| `updated_at` | TIMESTAMPTZ | NOT NULL | |
+
+**Format de `fields`:**
+```json
+[
+  { "id": "motivo", "label": "Motivo de consulta", "type": "textarea", "required": true },
+  { "id": "escala_ansiedad", "label": "Escala ansiedad (0-10)", "type": "number", "required": false }
+]
+```
+
+---
+
+### `job_queue`
+
+Cola de jobs asíncronos para procesar dictados que requieren tiempo.
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `id` | UUID | PK | |
+| `psychologist_id` | UUID | NOT NULL | Sin FK explícita (alta velocidad de insert) |
+| `patient_id` | UUID | FK → patients.id (RESTRICT) | |
+| `status` | VARCHAR(20) | NOT NULL, CHECK `IN ('pending','processing','completed','failed')` | |
+| `format` | VARCHAR(20) | NOT NULL, default `'SOAP'` | Formato de nota solicitado |
+| `raw_dictation` | TEXT | NOT NULL | Dictado cifrado con Fernet |
+| `template_fields` | JSONB | NULLABLE | Campos del template custom si aplica |
+| `result` | TEXT | NULLABLE | JSON cifrado con el resultado de Claude |
+| `error_message` | TEXT | NULLABLE | Mensaje de error si `status='failed'` |
+| `attempts` | INTEGER | NOT NULL, default `0` | Máx 3 intentos antes de fallar |
+| `created_at` | TIMESTAMPTZ | NOT NULL | |
+| `updated_at` | TIMESTAMPTZ | NOT NULL | |
+
+**Indexes:**
+- `idx_job_queue_status_created` — worker poll: `WHERE status='pending' ORDER BY created_at`
+- `idx_job_queue_psychologist_id` — lookup por psicólogo
 
 ---
 

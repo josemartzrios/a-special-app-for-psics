@@ -8,7 +8,7 @@
 
 ## Resumen
 
-Añadir una sección "Mi Perfil" a la app del psicólogo, accesible desde un nuevo tab en la navegación (BottomNav móvil + botón en sidebar desktop). Muestra datos personales de solo lectura y el estado de suscripción, con un modal embebido de Stripe para cambiar el método de pago sin salir de la app. Incluye también un botón inline para iniciar el flujo de cambio de contraseña por email, reutilizando el endpoint y pantallas ya existentes.
+Añadir una sección "Mi Perfil" a la app del psicólogo, accesible desde un nuevo tab en la navegación (BottomNav móvil + botón en sidebar desktop). Muestra datos personales de solo lectura y el estado de suscripción, con un modal embebido de Stripe para cambiar el método de pago sin salir de la app. El campo Contraseña es editable inline (expansión en Card 1) mediante un nuevo endpoint `POST /auth/change-password` que requiere la contraseña actual.
 
 ---
 
@@ -35,32 +35,39 @@ Ruta lógica: `activeSection === 'profile'`
 - Fondo: `#fefcfb` (igual que otras secciones)
 
 ### Card 1 — Datos personales
-Campos de solo lectura. Todos los valores llegan de `GET /auth/me`.
+Nombre, email y cédula son solo lectura. Contraseña es editable inline.
+Todos los valores de solo lectura llegan de `GET /auth/me`.
 
 | Label | Campo |
 |-------|-------|
 | Nombre | `name` |
 | Correo electrónico | `email` |
+| Contraseña | `••••••••` + ícono lápiz (expandible) |
 | Cédula profesional | `cedula_profesional` (si null → "No registrada" en gris) |
 
 Ícono de la card: persona, color sage.
 
-### Cambiar contraseña (dentro de Card 1)
+### Campo Contraseña — edición inline (S: responsabilidad única)
 
-Debajo del campo cédula profesional, un botón ghost `"Cambiar contraseña"` con ícono de candado.
+El campo Contraseña se implementa como sub-componente `ProfilePasswordField` para no mezclar lógica de edición con la presentación de Card 1 (SRP). Recibe solo las props que necesita — no el objeto perfil completo (ISP).
 
-**Flujo:** El email del psicólogo ya está cargado desde `GET /auth/me`. Click → llama `forgotPassword(profile.email)` (función existente en `api.js`) → el psicólogo recibe un email con link → abre `ResetPasswordScreen.jsx` ya existente para completar el cambio.
+**Interacción:** Click en el lápiz → el campo se expande inline dentro de Card 1 con tres inputs:
+1. Contraseña actual
+2. Nueva contraseña + componente `PasswordStrength` ya existente
+3. Confirmar nueva contraseña
+4. Botones "Guardar" (sage) + "Cancelar"
 
-**Estados del botón:**
+**Estados:**
 
 | Estado | UI |
 |--------|----|
-| `idle` | "Cambiar contraseña", ícono candado, `text-ink-secondary` ghost |
-| `sending` | "Enviando…" deshabilitado, spinner inline |
-| `sent` | Checkmark sage + "Enlace enviado a {email}" — reemplaza el botón hasta que el psicólogo recargue la página |
-| `error` | Mensaje de error rojo inline, botón re-habilitado |
+| `idle` | `••••••••` + ícono lápiz |
+| `editing` | Tres inputs expandidos, botones Guardar / Cancelar |
+| `saving` | "Guardando…" deshabilitado, spinner inline |
+| `success` | Checkmark sage + "Contraseña actualizada" — vuelve a `idle` tras 2 s |
+| `error` | Mensaje rojo inline (contraseña actual incorrecta / no cumple política), campos siguen visibles |
 
-El backend ya rate-limita a 1 solicitud por email cada 10 minutos. El estado `sent` en la UI previene doble-tap. No se requiere ningún endpoint ni función de `api.js` nuevos.
+**Cierre sin guardar:** Click en "Cancelar" o tecla `Escape` mientras `editing` → vuelve a `idle` limpiando los campos.
 
 ### Card 2 — Suscripción y pago
 Datos de `GET /billing/status` (ya existente) + campo nuevo `payment_method` que devuelve `{ brand, last4 }` cuando hay tarjeta registrada.
@@ -129,6 +136,39 @@ Nuevo endpoint en `api/auth.py`.
 ```
 
 Requiere `get_current_psychologist` (JWT auth estándar).
+
+---
+
+### `POST /auth/change-password`
+Nuevo endpoint en `api/auth.py`. Permite a un psicólogo autenticado cambiar su contraseña verificando la actual.
+
+**Schema Pydantic (separado del response — ISP):**
+```python
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+    @field_validator('new_password')
+    def password_strength(cls, v):
+        return validate_password(v)
+```
+
+**Lógica (guard clause — falla rápido):**
+```python
+@router.post("/change-password", status_code=204)
+async def change_password(
+    body: ChangePasswordRequest,
+    psychologist=Depends(get_current_psychologist),
+    db: AsyncSession = Depends(get_db),
+):
+    if not verify_password(body.current_password, psychologist.password_hash):
+        raise HTTPException(400, "Contraseña actual incorrecta")
+    psychologist.password_hash = hash_password(body.new_password)
+    db.add(AuditLog(psychologist_id=psychologist.id, action="password_changed"))
+    await db.commit()
+```
+
+Devuelve `204 No Content`. Rate limit: el limitador existente de auth se aplica por IP.
 
 ---
 
@@ -201,6 +241,13 @@ export async function getMyProfile() {
   return _authFetch(`${API_BASE}/auth/me`);
 }
 
+export async function changePassword(currentPassword, newPassword) {
+  return _authFetch(`${API_BASE}/auth/change-password`, {
+    method: 'POST',
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+  });
+}
+
 export async function createSetupIntent() {
   return _authFetch(`${API_BASE}/billing/setup-intent`, { method: 'POST' });
 }
@@ -229,17 +276,24 @@ npm install @stripe/react-stripe-js @stripe/stripe-js
 
 ## Tests
 
-### Backend
-- `test_get_me_returns_profile_fields` — verifica que `/auth/me` devuelve name, email, cedula_profesional
+### Backend (`backend/tests/test_profile_endpoints.py`)
+- `test_get_me_returns_profile_fields` — `/auth/me` devuelve name, email, cedula_profesional
 - `test_get_me_requires_auth` — 401 sin token
-- `test_create_setup_intent_returns_client_secret` — mock de Stripe, verifica que el endpoint devuelve `client_secret`
-- `test_webhook_setup_intent_succeeded_sets_default_pm` — mock de Stripe, verifica que el webhook actualiza el default payment method
+- `test_change_password_success` — contraseña actual correcta + nueva válida → 204, hash actualizado
+- `test_change_password_wrong_current` — contraseña actual incorrecta → 400
+- `test_change_password_policy_violation` — nueva contraseña débil → 422
+- `test_change_password_requires_auth` — 401 sin token
+- `test_create_setup_intent_returns_client_secret` — mock de Stripe, devuelve `client_secret`
+- `test_webhook_setup_intent_succeeded_sets_default_pm` — mock de Stripe, webhook actualiza default PM
 
 ### Frontend
-- `ProfileScreen.test.jsx`: renderiza los dos cards, muestra datos del mock de `/auth/me` y `/billing/status`
-- `ProfileScreen.test.jsx`: botón "Cambiar contraseña" llama `forgotPassword` con el email del perfil y pasa a estado `sent`
-- `ProfileScreen.test.jsx`: estado `sent` muestra mensaje de confirmación con el email, no el botón
-- `UpdateCardModal.test.jsx`: renderiza en estado loading → idle; cierra con Escape; botón "Cancelar" cierra; muestra estado success
+- `ProfilePasswordField.test.jsx`: muestra `••••••••` + lápiz en estado idle
+- `ProfilePasswordField.test.jsx`: click en lápiz expande los tres inputs
+- `ProfilePasswordField.test.jsx`: Guardar llama `changePassword` con los valores correctos y pasa a `success`
+- `ProfilePasswordField.test.jsx`: contraseña actual incorrecta (400) muestra error inline, campos visibles
+- `ProfilePasswordField.test.jsx`: Cancelar vuelve a idle limpiando campos
+- `ProfileScreen.test.jsx`: renderiza los dos cards con datos del mock de `/auth/me` y `/billing/status`
+- `UpdateCardModal.test.jsx`: loading → idle; cierra con Escape; Cancelar cierra; muestra success
 - `BottomNav.test.jsx`: tab "Perfil" presente y activo cuando `activeSection === 'profile'`
 
 ---
@@ -257,6 +311,11 @@ Al mergear esta feature, actualizar los siguientes archivos en `docs/architectur
 Devuelve los datos personales del psicólogo autenticado.
 Auth: Bearer JWT.
 Response: `{ id, name, email, cedula_profesional }`
+
+#### `POST /auth/change-password`
+Cambia la contraseña de un psicólogo autenticado verificando la actual.
+Auth: Bearer JWT. Body: `{ current_password, new_password }`.
+Returns 204. Errors: 400 (contraseña actual incorrecta), 422 (política).
 ```
 
 **Sección Billing (`/billing`)** — actualizar descripción de `GET /billing/status`:
@@ -270,8 +329,9 @@ Response: `{ id, name, email, cedula_profesional }`
 
 **Árbol de componentes** — añadir bajo la sección de componentes de app:
 ```
-├── ProfileScreen.jsx       # Perfil: datos personales + suscripción
-│   └── UpdateCardModal.jsx # Modal: actualización de tarjeta vía Stripe PaymentElement
+├── ProfileScreen.jsx           # Perfil: datos personales + suscripción
+│   ├── ProfilePasswordField.jsx # Sub-componente: edición inline de contraseña
+│   └── UpdateCardModal.jsx     # Modal: actualización de tarjeta vía Stripe PaymentElement
 ```
 
 **Sección BottomNav / navegación mobile** — actualizar para reflejar que ahora hay 3 tabs: Inicio, Agenda, Perfil. `activeSection` acepta `'patients' | 'agenda' | 'profile'`.
@@ -282,9 +342,9 @@ Response: `{ id, name, email, cedula_profesional }`
 
 ### `ARCHITECTURE.md`
 
-**Tabla de módulos backend** — actualizar `api/auth.py` para incluir `GET /me`. Actualizar `api/billing.py` para incluir `POST /setup-intent` y webhook `setup_intent.succeeded`.
+**Tabla de módulos backend** — actualizar `api/auth.py` para incluir `GET /me` y `POST /change-password`. Actualizar `api/billing.py` para incluir `POST /setup-intent` y webhook `setup_intent.succeeded`.
 
-**Diagrama de componentes frontend** — añadir `ProfileScreen` y `UpdateCardModal` como nodos bajo `App`. Actualizar la nota de `activeSection` para incluir el valor `'profile'`.
+**Diagrama de componentes frontend** — añadir `ProfileScreen`, `ProfilePasswordField` y `UpdateCardModal` como nodos bajo `App`. Actualizar la nota de `activeSection` para incluir el valor `'profile'`.
 
 **Navegación mobile** — actualizar descripción de BottomNav: 3 tabs (Inicio, Agenda, Perfil).
 
@@ -292,7 +352,7 @@ Response: `{ id, name, email, cedula_profesional }`
 
 ### `SECURITY_COMPLIANCE.md`
 
-**Tabla de audit log** — añadir nota: `password_reset_requested` puede dispararse desde el perfil (psicólogo autenticado con email pre-rellenado), además del flujo unauthenticated de forgot-password. El evento ya existe y se registra igual en ambos casos.
+**Tabla de audit log** — añadir evento `password_changed` (acción disparada por `POST /auth/change-password` desde el perfil autenticado). Distinto de `password_reset_requested` / `password_reset_completed` que pertenecen al flujo unauthenticated de forgot-password.
 
 ---
 
