@@ -8,7 +8,7 @@
 
 ## Resumen
 
-Añadir una sección "Mi Perfil" a la app del psicólogo, accesible desde un nuevo tab en la navegación (BottomNav móvil + botón en sidebar desktop). Muestra datos personales de solo lectura y el estado de suscripción, con un modal embebido de Stripe para cambiar el método de pago sin salir de la app. El campo Contraseña es editable inline (expansión en Card 1) mediante un nuevo endpoint `POST /auth/change-password` que requiere la contraseña actual.
+Añadir una sección "Mi Perfil" a la app del psicólogo, accesible desde un nuevo tab en la navegación (BottomNav móvil + botón en sidebar desktop). Muestra datos personales de solo lectura y el estado de suscripción, con un modal embebido de Stripe para cambiar el método de pago sin salir de la app. El campo Contraseña es editable inline (expansión en Card 1) mediante un nuevo endpoint `POST /auth/change-password` que requiere la contraseña actual. Los usuarios de cortesía (acceso activo sin suscripción Stripe) ven un estado diferenciado en Card 2 sin opciones de pago.
 
 ---
 
@@ -74,10 +74,12 @@ Datos de `GET /billing/status` (ya existente) + campo nuevo `payment_method` que
 
 | Elemento | Lógica |
 |----------|--------|
-| Badge de plan | `active` → verde sage; `trialing` → amber; `canceled`/`past_due` → rojo |
+| Badge de plan | `courtesy` → neutro (`bg-ink/5 text-ink-secondary`) "Acceso de Cortesía"; `active` → verde sage; `trialing` → amber; `canceled`/`past_due` → rojo |
 | Próximo cobro | Solo visible si `status === 'active'` y `!cancel_at_period_end` |
 | Chip de tarjeta | `VISA ···· 4242` — solo visible si `payment_method` existe |
-| Botón "Cambiar tarjeta" | Visible solo si `status === 'active'` — abre `UpdateCardModal` |
+| Botón "Cambiar tarjeta" | Visible solo si `status === 'active'` y `payment_method` existe — abre `UpdateCardModal` |
+
+**Estado cortesía:** cuando `status === 'courtesy'`, Card 2 muestra únicamente el badge "Acceso de Cortesía". Sin próximo cobro, sin chip de tarjeta, sin botón "Cambiar tarjeta".
 
 Ícono de la card: tarjeta de crédito, color amber.
 
@@ -173,11 +175,18 @@ Devuelve `204 No Content`. Rate limit: el limitador existente de auth se aplica 
 ---
 
 ### `GET /billing/status` — extensión
-Añadir campo `payment_method` al response existente cuando el psicólogo tiene `stripe_customer_id` y una suscripción activa.
+Dos cambios al endpoint existente:
 
-**Lógica:**
+**1. Detección de usuarios de cortesía (guard clause — antes del bloque `active`):**
 ```python
-# Dentro del bloque status == 'active'
+# Sub activa sin stripe_subscription_id → acceso de cortesía manual
+if sub.status == "active" and not sub.stripe_subscription_id:
+    return {"status": "courtesy"}
+```
+
+**2. Añadir campo `payment_method` para suscripciones Stripe activas:**
+```python
+# Dentro del bloque status == 'active' (solo llega aquí si stripe_subscription_id existe)
 pm = stripe.Customer.retrieve(
     psychologist.stripe_customer_id,
     expand=["invoice_settings.default_payment_method"]
@@ -193,24 +202,30 @@ if default_pm:
     }
 ```
 
-Si no hay método de pago o el status no es `active`, `payment_method` se omite / es `null`.
+Si no hay método de pago registrado en Stripe, `payment_method` se omite del response.
 
 ---
 
 ### `POST /billing/setup-intent`
 Nuevo endpoint en `api/billing.py`.
 
-**Lógica:**
+**Lógica (guard clause — falla rápido si es usuario de cortesía):**
 ```python
-setup_intent = stripe.SetupIntent.create(
-    customer=psychologist.stripe_customer_id,
-    payment_method_types=["card"],
-    usage="off_session",
-)
-return {"client_secret": setup_intent.client_secret}
+@router.post("/setup-intent")
+async def create_setup_intent(
+    psychologist=Depends(get_current_psychologist),
+):
+    if not psychologist.stripe_customer_id:
+        raise HTTPException(400, "Sin suscripción activa")
+    setup_intent = stripe.SetupIntent.create(
+        customer=psychologist.stripe_customer_id,
+        payment_method_types=["card"],
+        usage="off_session",
+    )
+    return {"client_secret": setup_intent.client_secret}
 ```
 
-Requiere `get_current_psychologist`. Solo disponible si `stripe_customer_id` existe.
+Requiere `get_current_psychologist`. Rechaza usuarios de cortesía con 400.
 
 ---
 
@@ -283,7 +298,9 @@ npm install @stripe/react-stripe-js @stripe/stripe-js
 - `test_change_password_wrong_current` — contraseña actual incorrecta → 400
 - `test_change_password_policy_violation` — nueva contraseña débil → 422
 - `test_change_password_requires_auth` — 401 sin token
+- `test_billing_status_courtesy` — sub activa sin `stripe_subscription_id` devuelve `{"status": "courtesy"}`
 - `test_create_setup_intent_returns_client_secret` — mock de Stripe, devuelve `client_secret`
+- `test_create_setup_intent_rejects_courtesy_user` — usuario sin `stripe_customer_id` → 400
 - `test_webhook_setup_intent_succeeded_sets_default_pm` — mock de Stripe, webhook actualiza default PM
 
 ### Frontend
@@ -293,6 +310,7 @@ npm install @stripe/react-stripe-js @stripe/stripe-js
 - `ProfilePasswordField.test.jsx`: contraseña actual incorrecta (400) muestra error inline, campos visibles
 - `ProfilePasswordField.test.jsx`: Cancelar vuelve a idle limpiando campos
 - `ProfileScreen.test.jsx`: renderiza los dos cards con datos del mock de `/auth/me` y `/billing/status`
+- `ProfileScreen.test.jsx`: estado `courtesy` muestra solo badge "Acceso de Cortesía", sin chip ni botón "Cambiar tarjeta"
 - `UpdateCardModal.test.jsx`: loading → idle; cierra con Escape; Cancelar cierra; muestra success
 - `BottomNav.test.jsx`: tab "Perfil" presente y activo cuando `activeSection === 'profile'`
 
@@ -319,8 +337,9 @@ Returns 204. Errors: 400 (contraseña actual incorrecta), 422 (política).
 ```
 
 **Sección Billing (`/billing`)** — actualizar descripción de `GET /billing/status`:
-- Añadir campo `payment_method: { brand, last4 }` al response (presente solo cuando `status === 'active'` y existe PM default en Stripe).
-- Añadir `POST /billing/setup-intent`: crea un Stripe SetupIntent, devuelve `{ client_secret }`. Requiere JWT.
+- Añadir valor `"courtesy"` al campo `status` (usuarios con acceso activo sin suscripción Stripe).
+- Añadir campo `payment_method: { brand, last4 }` al response (presente solo cuando `status === 'active'` con Stripe y existe PM default).
+- Añadir `POST /billing/setup-intent`: crea un Stripe SetupIntent, devuelve `{ client_secret }`. Requiere JWT. Retorna 400 si el usuario no tiene `stripe_customer_id`.
 - Añadir en la sección de webhook: evento `setup_intent.succeeded` → adjunta PM al customer y lo establece como default.
 
 ---
