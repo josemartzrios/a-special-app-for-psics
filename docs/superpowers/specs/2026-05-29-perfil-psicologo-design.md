@@ -244,6 +244,58 @@ npm install @stripe/react-stripe-js @stripe/stripe-js
 
 ---
 
+## Documentación de arquitectura a actualizar
+
+Al mergear esta feature, actualizar los siguientes archivos en `docs/architecture/`:
+
+### `API_REFERENCE.md`
+
+**Sección Auth (`/auth`)** — añadir después de `POST /reset-password`:
+
+```
+#### `GET /auth/me`
+Devuelve los datos personales del psicólogo autenticado.
+Auth: Bearer JWT.
+Response: `{ id, name, email, cedula_profesional }`
+```
+
+**Sección Billing (`/billing`)** — actualizar descripción de `GET /billing/status`:
+- Añadir campo `payment_method: { brand, last4 }` al response (presente solo cuando `status === 'active'` y existe PM default en Stripe).
+- Añadir `POST /billing/setup-intent`: crea un Stripe SetupIntent, devuelve `{ client_secret }`. Requiere JWT.
+- Añadir en la sección de webhook: evento `setup_intent.succeeded` → adjunta PM al customer y lo establece como default.
+
+---
+
+### `FRONTEND_GUIDE.md`
+
+**Árbol de componentes** — añadir bajo la sección de componentes de app:
+```
+├── ProfileScreen.jsx       # Perfil: datos personales + suscripción
+│   └── UpdateCardModal.jsx # Modal: actualización de tarjeta vía Stripe PaymentElement
+```
+
+**Sección BottomNav / navegación mobile** — actualizar para reflejar que ahora hay 3 tabs: Inicio, Agenda, Perfil. `activeSection` acepta `'patients' | 'agenda' | 'profile'`.
+
+**Estado de auth flow** — `ProfileScreen` vive dentro del estado `Authenticated`, no es una pantalla de auth. No modifica el diagrama de auth screens.
+
+---
+
+### `ARCHITECTURE.md`
+
+**Tabla de módulos backend** — actualizar `api/auth.py` para incluir `GET /me`. Actualizar `api/billing.py` para incluir `POST /setup-intent` y webhook `setup_intent.succeeded`.
+
+**Diagrama de componentes frontend** — añadir `ProfileScreen` y `UpdateCardModal` como nodos bajo `App`. Actualizar la nota de `activeSection` para incluir el valor `'profile'`.
+
+**Navegación mobile** — actualizar descripción de BottomNav: 3 tabs (Inicio, Agenda, Perfil).
+
+---
+
+### `SECURITY_COMPLIANCE.md`
+
+**Tabla de audit log** — añadir nota: `password_reset_requested` puede dispararse desde el perfil (psicólogo autenticado con email pre-rellenado), además del flujo unauthenticated de forgot-password. El evento ya existe y se registra igual en ambos casos.
+
+---
+
 ## Fuera de scope
 
 - Edición de datos personales (nombre, cédula) — solo lectura en esta iteración
