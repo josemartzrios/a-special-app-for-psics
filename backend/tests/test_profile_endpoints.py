@@ -159,3 +159,75 @@ def test_create_setup_intent_no_stripe_customer():
     app.dependency_overrides.clear()
 
     assert resp.status_code == 400
+
+
+def test_billing_status_courtesy():
+    """Sub activa sin stripe_subscription_id → acceso de cortesía manual."""
+    from database import get_db
+
+    psych = _mock_psych(stripe_customer_id=None)
+    app.dependency_overrides[get_current_psychologist] = lambda: psych
+
+    mock_sub = MagicMock()
+    mock_sub.status = "active"
+    mock_sub.stripe_subscription_id = None
+
+    async def mock_get_db():
+        mock_db = MagicMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_sub
+        async def _exec(*a, **kw): return mock_result
+        mock_db.execute = _exec
+        yield mock_db
+
+    app.dependency_overrides[get_db] = mock_get_db
+
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/billing/status")
+
+    app.dependency_overrides.clear()
+
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "courtesy"
+
+
+def test_billing_status_active_includes_payment_method():
+    from database import get_db
+
+    psych = _mock_psych()
+    app.dependency_overrides[get_current_psychologist] = lambda: psych
+
+    mock_sub = MagicMock()
+    mock_sub.status = "active"
+    mock_sub.stripe_subscription_id = "sub_test123"
+    mock_sub.current_period_end = None
+    mock_sub.cancel_at_period_end = False
+
+    mock_pm = MagicMock()
+    mock_pm.card.brand = "visa"
+    mock_pm.card.last4 = "4242"
+
+    mock_customer = MagicMock()
+    mock_customer.invoice_settings.default_payment_method = mock_pm
+
+    async def mock_get_db():
+        mock_db = MagicMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_sub
+        async def _exec(*a, **kw): return mock_result
+        mock_db.execute = _exec
+        yield mock_db
+
+    app.dependency_overrides[get_db] = mock_get_db
+
+    with patch("api.billing.stripe.Customer.retrieve", return_value=mock_customer):
+        with TestClient(app) as client:
+            resp = client.get("/api/v1/billing/status")
+
+    app.dependency_overrides.clear()
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "active"
+    assert data["payment_method"]["brand"] == "visa"
+    assert data["payment_method"]["last4"] == "4242"

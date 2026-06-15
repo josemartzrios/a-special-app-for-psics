@@ -37,11 +37,28 @@ async def get_billing_status(
         days = (trial_end - datetime.now(timezone.utc)).days
         return {"status": "trialing", "days_remaining": max(0, days)}
         
+    # Sub activa sin stripe_subscription_id → acceso de cortesía manual
+    if sub.status == "active" and not sub.stripe_subscription_id:
+        return {"status": "courtesy"}
+
     if sub.status == "active":
+        payment_method = None
+        if psychologist.stripe_customer_id:
+            try:
+                customer = stripe.Customer.retrieve(
+                    psychologist.stripe_customer_id,
+                    expand=["invoice_settings.default_payment_method"],
+                )
+                pm = customer.invoice_settings.default_payment_method
+                if pm and hasattr(pm, "card") and pm.card:
+                    payment_method = {"brand": pm.card.brand, "last4": pm.card.last4}
+            except Exception as e:
+                logger.warning("Could not fetch payment method from Stripe: %s", e)
         return {
             "status": "active",
             "current_period_end": sub.current_period_end,
             "cancel_at_period_end": sub.cancel_at_period_end,
+            "payment_method": payment_method,
         }
     return {
         "status": sub.status,
