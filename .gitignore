@@ -1,6 +1,9 @@
 *.env   
 .env
 
+frontend/.env
+backend/.env
+
 *node_modules
 *venv
 *__pycache__
@@ -10,3 +13,4 @@
 backend/.coverage
 backend/htmlcov/
 .vercel
+

@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Añadir pantalla "Mi Perfil" al psicólogo con datos personales de solo lectura y modal embebido de Stripe para cambiar método de pago, accesible desde un nuevo tab "Perfil" en la navegación.
+**Goal:** Añadir pantalla "Mi Perfil" al psicólogo con datos personales de solo lectura, edición inline de contraseña, y modal embebido de Stripe para cambiar método de pago, accesible desde un nuevo tab "Perfil" en la navegación.
 
-**Architecture:** Backend añade `GET /auth/me`, extiende `GET /billing/status` con `payment_method`, añade `POST /billing/setup-intent` y un handler en el webhook existente. Frontend añade `ProfileScreen` + `UpdateCardModal` (con Stripe Elements), cable en `App.jsx` con nuevo tab en `BottomNav` (mobile) y botón en el sidebar desktop.
+**Architecture:** Backend añade `GET /auth/me`, `POST /auth/change-password`, extiende `GET /billing/status` con detección de usuarios de cortesía y campo `payment_method`, añade `POST /billing/setup-intent` y un handler en el webhook existente. Frontend añade `ProfileScreen` + `ProfilePasswordField` (edición inline de contraseña) + `UpdateCardModal` (con Stripe Elements), cable en `App.jsx` con nuevo tab en `BottomNav` (mobile) y botón en el sidebar desktop.
 
 **Tech Stack:** FastAPI + SQLAlchemy (backend), React 18 + `@stripe/react-stripe-js` + `@stripe/stripe-js` (frontend), Stripe PaymentElement + SetupIntent para captura de tarjeta PCI-compliant.
 
@@ -15,6 +15,8 @@
 **Creados:**
 - `frontend/src/components/ProfileScreen.jsx`
 - `frontend/src/components/ProfileScreen.test.jsx`
+- `frontend/src/components/ProfilePasswordField.jsx`
+- `frontend/src/components/ProfilePasswordField.test.jsx`
 - `frontend/src/components/UpdateCardModal.jsx`
 - `frontend/src/components/UpdateCardModal.test.jsx`
 - `backend/tests/test_profile_endpoints.py`
@@ -23,10 +25,10 @@
 - `frontend/src/components/BottomNav.jsx` — tercer tab "Perfil"
 - `frontend/src/components/BottomNav.test.jsx` — test del tab nuevo
 - `frontend/src/App.jsx` — import ProfileScreen, render sección 'profile', botón sidebar desktop
-- `frontend/src/api.js` — añadir `getMyProfile`, `createSetupIntent`
+- `frontend/src/api.js` — añadir `getMyProfile`, `changePassword`, `createSetupIntent`
 - `frontend/package.json` — añadir paquetes Stripe
-- `backend/api/auth.py` — añadir `GET /auth/me`
-- `backend/api/billing.py` — extender `/status`, añadir `/setup-intent`, handler webhook
+- `backend/api/auth.py` — añadir `GET /auth/me` y `POST /auth/change-password`
+- `backend/api/billing.py` — extender `/status` (cortesía + payment_method), añadir `/setup-intent`, handler webhook
 
 ---
 
@@ -36,38 +38,51 @@
 
 **Backend:**
 - `GET /auth/me` solo lee campos del objeto `psychologist` y los retorna — sin lógica de negocio.
+- `POST /auth/change-password` solo verifica la contraseña actual y actualiza el hash — no mezcla con lógica de sesión ni billing.
 - `POST /billing/setup-intent` solo crea el intent en Stripe — no toca DB ni modifica estado.
 - El handler `setup_intent.succeeded` en el webhook solo actualiza el default PM — no mezcla con otros eventos.
 - La extensión de `GET /billing/status` encapsula el fetch de Stripe en un `try/except` interno; si falla, el status se retorna igual — no contiene lógica de presentación.
 
 **Frontend:**
-- `ProfileScreen.jsx` se descompone en tres sub-componentes de presentación pura: `FieldRow` (un campo), `PlanBadge` (badge de estado), `PaymentChip` (chip de tarjeta). Cada uno recibe solo los props que necesita.
+- `ProfilePasswordField.jsx` encapsula toda la lógica de edición inline de contraseña como sub-componente independiente (SRP). Card 1 de `ProfileScreen` no sabe nada del estado de edición — solo renderiza `<ProfilePasswordField />`.
+- `ProfileScreen.jsx` se descompone en sub-componentes de presentación pura: `FieldRow` (un campo), `PlanBadge` (badge de estado), `PaymentChip` (chip de tarjeta). Cada uno recibe solo los props que necesita.
 - `UpdateCardModal.jsx` separa `CardForm` (lógica del form + Stripe) y `SuccessState` (estado final) — dos responsabilidades distintas en dos componentes distintos.
 
 ### O — Open/Closed
 
-- `GET /auth/me` es un endpoint nuevo — no modifica la lógica de login/register existente.
+- `GET /auth/me` y `POST /auth/change-password` son endpoints nuevos — no modifican la lógica de login/register existente.
+- La cortesía se detecta con una guard clause añadida **antes** del bloque `active` de `billing/status` — no altera las ramas existentes.
 - `payment_method` se añade al bloque `active` de `billing/status` sin alterar las ramas `trialing`, `past_due`, `canceled`.
 - El webhook añade `elif event.type == "setup_intent.succeeded"` como una rama nueva — no toca los handlers existentes de `checkout.session.completed`, `invoice.*`, ni `customer.subscription.*`.
 
 ### I — Interface Segregation
 
+- `ProfilePasswordField` recibe solo las props que necesita: ninguna del perfil completo (ISP). No tiene acceso al objeto billing ni al estado de la pantalla.
 - `ProfileScreen` no recibe props de `App.jsx` — fetcha su propio estado. `App.jsx` no necesita saber qué datos necesita el perfil.
 - `UpdateCardModal` expone solo tres props: `open`, `onClose`, `onSuccess`. No recibe el estado de billing ni el perfil.
 - `FieldRow`, `PlanBadge`, `PaymentChip` reciben solo los datos que renderizan — sin acceso al objeto completo.
 
 ### D — Dependency Inversion
 
-- `GET /auth/me` y `POST /billing/setup-intent` dependen de `get_current_psychologist` via `Depends()` — no instancian ni consultan la sesión de DB directamente.
-- `UpdateCardModal` depende de `createSetupIntent` de `api.js` (abstracción HTTP), no de `fetch` directamente. En tests, se reemplaza con `vi.mock('../api')`.
+- `GET /auth/me`, `POST /auth/change-password` y `POST /billing/setup-intent` dependen de `get_current_psychologist` via `Depends()` — no instancian ni consultan la sesión de DB directamente.
+- `ProfilePasswordField` depende de `changePassword` de `api.js` (abstracción HTTP), no de `fetch` directamente. En tests, se reemplaza con `vi.mock('../api')`.
+- `UpdateCardModal` depende de `createSetupIntent` de `api.js` (abstracción HTTP). En tests, se reemplaza con `vi.mock('../api')`.
 - Los tests usan `dependency_overrides[get_current_psychologist]` para inyectar mocks — funciona porque la dependencia es una abstracción, no una implementación concreta.
 
 ### Guard Clause (Early Return)
 
-`create_setup_intent` valida al inicio y retorna 400 si no hay `stripe_customer_id` — la lógica principal de Stripe no está anidada en un `if`:
+`POST /auth/change-password` valida la contraseña actual al inicio y retorna 400 si es incorrecta — la lógica de actualización no está anidada en un `if`:
 
 ```python
 # Bien — guard clause
+if not verify_password(body.current_password, psychologist.password_hash):
+    raise HTTPException(status_code=400, detail="Contraseña actual incorrecta")
+psychologist.password_hash = hash_password(body.new_password)  # sin anidamiento
+```
+
+`create_setup_intent` valida al inicio y retorna 400 si no hay `stripe_customer_id`:
+
+```python
 if not psychologist.stripe_customer_id:
     raise HTTPException(status_code=400, detail="...")
 setup_intent = stripe.SetupIntent.create(...)  # sin anidamiento
@@ -79,6 +94,7 @@ setup_intent = stripe.SetupIntent.create(...)  # sin anidamiento
 - `canChangeCard` — booleano que expresa la condición de negocio (`status === 'active'`), no un valor literal disperso.
 - `showNextBilling` — idem, agrupa tres condiciones en un nombre legible.
 - `loadingSecret` — distingue el loading del SetupIntent del loading general del componente.
+- `editState` — estado del campo contraseña (`idle | editing | saving | success | error`), no `isOpen` ni `mode`.
 
 ### Tests: un assert por concepto
 
@@ -86,11 +102,12 @@ Cada test del plan verifica un solo comportamiento observable:
 
 ```python
 # Bien — un test, un concepto
-def test_get_me_null_cedula():
+def test_change_password_wrong_current():
     ...
-    assert resp.json()["cedula_profesional"] is None
+    assert resp.status_code == 400
+    assert "incorrecta" in resp.json()["detail"].lower()
 
-# No mezclamos con: status code, name, email en el mismo test
+# No mezclamos con: hash actualizado, audit log, etc.
 ```
 
 ---
@@ -224,7 +241,7 @@ Esperado: `FAILED` — `404 Not Found` (endpoint no existe aún).
 
 - [ ] **Step 3: Implementar el endpoint**
 
-En `backend/api/auth.py`, añadir al final del archivo (antes de las funciones auxiliares de paciente si las hay, después del último `@router` de psicólogo):
+En `backend/api/auth.py`, añadir al final del archivo (después del último `@router` de psicólogo):
 
 ```python
 @router.get("/me")
@@ -256,7 +273,151 @@ git commit -m "feat(backend): add GET /auth/me endpoint"
 
 ---
 
-## Task 2: Backend — POST /billing/setup-intent
+## Task 2: Backend — POST /auth/change-password
+
+**Files:**
+- Modify: `backend/api/auth.py`
+- Modify: `backend/tests/test_profile_endpoints.py`
+
+- [ ] **Step 1: Añadir tests (fallarán)**
+
+En `backend/tests/test_profile_endpoints.py`, añadir al final:
+
+```python
+from unittest.mock import patch as _patch
+
+
+def test_change_password_success():
+    psych = _mock_psych()
+    # Simular hash válido para la contraseña "OldPass123!"
+    psych.password_hash = "hashed_old"
+    app.dependency_overrides[get_current_psychologist] = lambda: psych
+
+    with _patch("api.auth.verify_password", return_value=True), \
+         _patch("api.auth.hash_password", return_value="hashed_new"):
+        with TestClient(app) as client:
+            resp = client.post(
+                "/api/v1/auth/change-password",
+                json={"current_password": "OldPass123!", "new_password": "NewPass456!"},
+            )
+
+    app.dependency_overrides.clear()
+
+    assert resp.status_code == 204
+    assert psych.password_hash == "hashed_new"
+
+
+def test_change_password_wrong_current():
+    psych = _mock_psych()
+    app.dependency_overrides[get_current_psychologist] = lambda: psych
+
+    with _patch("api.auth.verify_password", return_value=False):
+        with TestClient(app) as client:
+            resp = client.post(
+                "/api/v1/auth/change-password",
+                json={"current_password": "WrongPass!", "new_password": "NewPass456!"},
+            )
+
+    app.dependency_overrides.clear()
+
+    assert resp.status_code == 400
+    assert "incorrecta" in resp.json()["detail"].lower()
+
+
+def test_change_password_policy_violation():
+    psych = _mock_psych()
+    app.dependency_overrides[get_current_psychologist] = lambda: psych
+
+    with _patch("api.auth.verify_password", return_value=True):
+        with TestClient(app) as client:
+            resp = client.post(
+                "/api/v1/auth/change-password",
+                json={"current_password": "OldPass123!", "new_password": "weak"},
+            )
+
+    app.dependency_overrides.clear()
+
+    assert resp.status_code == 422
+
+
+def test_change_password_requires_auth():
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/v1/auth/change-password",
+            json={"current_password": "OldPass123!", "new_password": "NewPass456!"},
+        )
+    assert resp.status_code == 401
+```
+
+- [ ] **Step 2: Ejecutar — deben fallar**
+
+```bash
+python -m pytest tests/test_profile_endpoints.py::test_change_password_success -v
+```
+
+Esperado: `FAILED` — 404.
+
+- [ ] **Step 3: Implementar el schema y endpoint**
+
+En `backend/api/auth.py`, añadir después del schema de `get_me` (o junto a los demás schemas Pydantic del archivo):
+
+```python
+from services.password import validate_password
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+    @field_validator('new_password')
+    @classmethod
+    def password_strength(cls, v):
+        return validate_password(v)
+```
+
+Luego añadir el endpoint (después de `GET /me`):
+
+```python
+@router.post("/change-password", status_code=204)
+async def change_password(
+    body: ChangePasswordRequest,
+    psychologist=Depends(get_current_psychologist),
+    db: AsyncSession = Depends(get_db),
+):
+    if not verify_password(body.current_password, psychologist.password_hash):
+        raise HTTPException(status_code=400, detail="Contraseña actual incorrecta")
+    psychologist.password_hash = hash_password(body.new_password)
+    db.add(AuditLog(psychologist_id=psychologist.id, action="password_changed"))
+    await db.commit()
+```
+
+Nota: verificar que `hash_password`, `verify_password` y `AuditLog` ya están importados en `auth.py`. Añadir los imports faltantes si es necesario.
+
+- [ ] **Step 4: Ejecutar todos los tests de contraseña — deben pasar**
+
+```bash
+python -m pytest tests/test_profile_endpoints.py::test_change_password_success tests/test_profile_endpoints.py::test_change_password_wrong_current tests/test_profile_endpoints.py::test_change_password_policy_violation tests/test_profile_endpoints.py::test_change_password_requires_auth -v
+```
+
+Esperado: 4 tests `PASSED`.
+
+- [ ] **Step 5: Ejecutar todos los tests del archivo — sin regresiones**
+
+```bash
+python -m pytest tests/test_profile_endpoints.py -v
+```
+
+Esperado: todos `PASSED`.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add backend/api/auth.py backend/tests/test_profile_endpoints.py
+git commit -m "feat(backend): add POST /auth/change-password endpoint"
+```
+
+---
+
+## Task 3: Backend — POST /billing/setup-intent
 
 **Files:**
 - Modify: `backend/api/billing.py`
@@ -347,24 +508,60 @@ git commit -m "feat(backend): add POST /billing/setup-intent endpoint"
 
 ---
 
-## Task 3: Backend — Extender GET /billing/status con payment_method
+## Task 4: Backend — Extender GET /billing/status (cortesía + payment_method)
 
 **Files:**
 - Modify: `backend/api/billing.py`
 - Modify: `backend/tests/test_profile_endpoints.py`
 
-- [ ] **Step 1: Añadir test**
+Este task hace **dos cambios** al endpoint existente:
+1. Guard clause de cortesía (antes del bloque `active`)
+2. Campo `payment_method` dentro del bloque `active`
+
+- [ ] **Step 1: Añadir tests**
 
 En `backend/tests/test_profile_endpoints.py`, añadir al final:
 
 ```python
+def test_billing_status_courtesy():
+    """Sub activa sin stripe_subscription_id → acceso de cortesía manual."""
+    from database import get_db
+
+    psych = _mock_psych(stripe_customer_id=None)
+    app.dependency_overrides[get_current_psychologist] = lambda: psych
+
+    mock_sub = MagicMock()
+    mock_sub.status = "active"
+    mock_sub.stripe_subscription_id = None
+
+    async def mock_get_db():
+        mock_db = MagicMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_sub
+        async def _exec(*a, **kw): return mock_result
+        mock_db.execute = _exec
+        yield mock_db
+
+    app.dependency_overrides[get_db] = mock_get_db
+
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/billing/status")
+
+    app.dependency_overrides.clear()
+
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "courtesy"
+
+
 def test_billing_status_active_includes_payment_method():
     from database import get_db
+
     psych = _mock_psych()
     app.dependency_overrides[get_current_psychologist] = lambda: psych
 
     mock_sub = MagicMock()
     mock_sub.status = "active"
+    mock_sub.stripe_subscription_id = "sub_test123"
     mock_sub.current_period_end = None
     mock_sub.cancel_at_period_end = False
 
@@ -375,21 +572,14 @@ def test_billing_status_active_includes_payment_method():
     mock_customer = MagicMock()
     mock_customer.invoice_settings.default_payment_method = mock_pm
 
-    from database import get_db, Subscription
-    from sqlalchemy.ext.asyncio import AsyncSession
-
     async def mock_get_db():
-        mock_db = MagicMock(spec=AsyncSession)
+        mock_db = MagicMock()
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = mock_sub
-        mock_db.execute = MagicMock(return_value=mock_result)
-        # Make execute awaitable
-        import asyncio
         async def _exec(*a, **kw): return mock_result
         mock_db.execute = _exec
         yield mock_db
 
-    app.dependency_overrides[get_current_psychologist] = lambda: psych
     app.dependency_overrides[get_db] = mock_get_db
 
     with patch("api.billing.stripe.Customer.retrieve", return_value=mock_customer):
@@ -405,17 +595,27 @@ def test_billing_status_active_includes_payment_method():
     assert data["payment_method"]["last4"] == "4242"
 ```
 
-- [ ] **Step 2: Ejecutar — debe fallar**
+- [ ] **Step 2: Ejecutar — deben fallar**
 
 ```bash
-python -m pytest tests/test_profile_endpoints.py::test_billing_status_active_includes_payment_method -v
+python -m pytest tests/test_profile_endpoints.py::test_billing_status_courtesy tests/test_profile_endpoints.py::test_billing_status_active_includes_payment_method -v
 ```
 
-Esperado: `FAILED` — no hay campo `payment_method` en el response actual.
+Esperado: `FAILED`.
 
-- [ ] **Step 3: Modificar el bloque `active` en GET /billing/status**
+- [ ] **Step 3: Añadir guard clause de cortesía**
 
-En `backend/api/billing.py`, localizar el bloque:
+En `backend/api/billing.py`, localizar el bloque `if sub.status == "active":` y añadir **antes** de él:
+
+```python
+# Sub activa sin stripe_subscription_id → acceso de cortesía manual
+if sub.status == "active" and not sub.stripe_subscription_id:
+    return {"status": "courtesy"}
+```
+
+- [ ] **Step 4: Añadir campo payment_method al bloque active**
+
+Localizar el bloque actual:
 
 ```python
 if sub.status == "active":
@@ -450,17 +650,9 @@ if sub.status == "active":
     }
 ```
 
-Nota: la firma del endpoint `get_billing_status` ya tiene `psychologist = Depends(get_current_psychologist)`. Verificar que esté presente; si no, añadirlo junto a `db`.
+Nota: la firma del endpoint `get_billing_status` debe tener `psychologist = Depends(get_current_psychologist)`. Verificar que esté presente; si no, añadirlo junto a `db`.
 
-- [ ] **Step 4: Ejecutar el test — debe pasar**
-
-```bash
-python -m pytest tests/test_profile_endpoints.py::test_billing_status_active_includes_payment_method -v
-```
-
-Esperado: `PASSED`.
-
-- [ ] **Step 5: Ejecutar todos los tests del archivo para verificar no hay regresiones**
+- [ ] **Step 5: Ejecutar todos los tests — sin regresiones**
 
 ```bash
 python -m pytest tests/test_profile_endpoints.py -v
@@ -472,12 +664,12 @@ Esperado: todos `PASSED`.
 
 ```bash
 git add backend/api/billing.py backend/tests/test_profile_endpoints.py
-git commit -m "feat(backend): extend billing/status with payment_method field"
+git commit -m "feat(backend): add courtesy detection and payment_method to billing/status"
 ```
 
 ---
 
-## Task 4: Backend — Webhook setup_intent.succeeded
+## Task 5: Backend — Webhook setup_intent.succeeded
 
 **Files:**
 - Modify: `backend/api/billing.py`
@@ -510,17 +702,15 @@ def test_webhook_setup_intent_succeeded_sets_default_pm():
     mock_event.data.object.payment_method = "pm_test_4242"
     mock_event.data.object.customer = "cus_test123"
 
-    from database import get_db, ProcessedStripeEvent
+    from database import get_db
 
     async def mock_get_db():
         mock_db = MagicMock()
-        # ProcessedStripeEvent lookup — not found (new event)
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = None
         async def _exec(*a, **kw): return mock_result
         mock_db.execute = _exec
         mock_db.add = MagicMock()
-        mock_db.commit = MagicMock(return_value=None)
         async def _commit(): pass
         mock_db.commit = _commit
         yield mock_db
@@ -593,18 +783,25 @@ git commit -m "feat(backend): handle setup_intent.succeeded webhook to update de
 
 ---
 
-## Task 5: Frontend — api.js: getMyProfile + createSetupIntent
+## Task 6: Frontend — api.js: getMyProfile + changePassword + createSetupIntent
 
 **Files:**
 - Modify: `frontend/src/api.js`
 
-- [ ] **Step 1: Añadir las dos funciones a api.js**
+- [ ] **Step 1: Añadir las tres funciones a api.js**
 
 Localizar el bloque `// --- Billing ---` en `frontend/src/api.js` (donde están `getBillingStatus`, `createCheckout`, `cancelSubscription`) y añadir al final de ese bloque:
 
 ```js
 export async function getMyProfile() {
   return _authFetch(`${API_BASE}/auth/me`);
+}
+
+export async function changePassword(currentPassword, newPassword) {
+  return _authFetch(`${API_BASE}/auth/change-password`, {
+    method: 'POST',
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+  });
 }
 
 export async function createSetupIntent() {
@@ -616,21 +813,21 @@ export async function createSetupIntent() {
 
 ```bash
 cd frontend
-grep -n "getMyProfile\|createSetupIntent" src/api.js
+grep -n "getMyProfile\|changePassword\|createSetupIntent" src/api.js
 ```
 
-Esperado: dos líneas con `export async function`.
+Esperado: tres líneas con `export async function`.
 
 - [ ] **Step 3: Commit**
 
 ```bash
 git add frontend/src/api.js
-git commit -m "feat(frontend): add getMyProfile and createSetupIntent to api.js"
+git commit -m "feat(frontend): add getMyProfile, changePassword and createSetupIntent to api.js"
 ```
 
 ---
 
-## Task 6: Frontend — BottomNav: añadir tab "Perfil"
+## Task 7: Frontend — BottomNav: añadir tab "Perfil"
 
 **Files:**
 - Modify: `frontend/src/components/BottomNav.jsx`
@@ -705,7 +902,7 @@ const tabs = [
 npx vitest run src/components/BottomNav.test.jsx
 ```
 
-Esperado: 5 tests `PASSED`.
+Esperado: todos los tests `PASSED`.
 
 - [ ] **Step 5: Commit**
 
@@ -716,7 +913,281 @@ git commit -m "feat(frontend): add Perfil tab to BottomNav"
 
 ---
 
-## Task 7: Frontend — ProfileScreen.jsx
+## Task 8: Frontend — ProfilePasswordField.jsx
+
+Sub-componente de edición inline de contraseña. Vive dentro de Card 1 de `ProfileScreen`. Se implementa primero para poder importarlo en la tarea siguiente (SRP: ProfileScreen no mezcla lógica de contraseña con presentación de perfil).
+
+**Files:**
+- Create: `frontend/src/components/ProfilePasswordField.jsx`
+- Create: `frontend/src/components/ProfilePasswordField.test.jsx`
+
+- [ ] **Step 1: Escribir el test**
+
+Crear `frontend/src/components/ProfilePasswordField.test.jsx`:
+
+```jsx
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+
+vi.mock('../api', () => ({
+  changePassword: vi.fn(),
+}));
+
+import { changePassword } from '../api';
+import ProfilePasswordField from './ProfilePasswordField';
+
+describe('ProfilePasswordField', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('muestra punto medio y lápiz en estado idle', () => {
+    render(<ProfilePasswordField />);
+    expect(screen.getByText('••••••••')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /editar contraseña/i })).toBeInTheDocument();
+  });
+
+  it('expande los tres inputs al hacer click en el lápiz', async () => {
+    const user = userEvent.setup();
+    render(<ProfilePasswordField />);
+    await user.click(screen.getByRole('button', { name: /editar contraseña/i }));
+    expect(screen.getByPlaceholderText(/contraseña actual/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/nueva contraseña/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/confirmar/i)).toBeInTheDocument();
+  });
+
+  it('Guardar llama changePassword con los valores correctos y pasa a success', async () => {
+    const user = userEvent.setup();
+    changePassword.mockResolvedValue({});
+    render(<ProfilePasswordField />);
+
+    await user.click(screen.getByRole('button', { name: /editar contraseña/i }));
+    await user.type(screen.getByPlaceholderText(/contraseña actual/i), 'OldPass123!');
+    await user.type(screen.getByPlaceholderText(/nueva contraseña/i), 'NewPass456!');
+    await user.type(screen.getByPlaceholderText(/confirmar/i), 'NewPass456!');
+    await user.click(screen.getByRole('button', { name: /guardar/i }));
+
+    await waitFor(() => {
+      expect(changePassword).toHaveBeenCalledWith('OldPass123!', 'NewPass456!');
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/contraseña actualizada/i)).toBeInTheDocument();
+    });
+  });
+
+  it('contraseña actual incorrecta (400) muestra error inline, campos siguen visibles', async () => {
+    const user = userEvent.setup();
+    changePassword.mockRejectedValue({ status: 400, message: 'Contraseña actual incorrecta' });
+    render(<ProfilePasswordField />);
+
+    await user.click(screen.getByRole('button', { name: /editar contraseña/i }));
+    await user.type(screen.getByPlaceholderText(/contraseña actual/i), 'WrongPass!');
+    await user.type(screen.getByPlaceholderText(/nueva contraseña/i), 'NewPass456!');
+    await user.type(screen.getByPlaceholderText(/confirmar/i), 'NewPass456!');
+    await user.click(screen.getByRole('button', { name: /guardar/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/incorrecta/i)).toBeInTheDocument();
+    });
+    expect(screen.getByPlaceholderText(/contraseña actual/i)).toBeInTheDocument();
+  });
+
+  it('Cancelar vuelve a idle limpiando los campos', async () => {
+    const user = userEvent.setup();
+    render(<ProfilePasswordField />);
+
+    await user.click(screen.getByRole('button', { name: /editar contraseña/i }));
+    await user.type(screen.getByPlaceholderText(/contraseña actual/i), 'algo');
+    await user.click(screen.getByRole('button', { name: /cancelar/i }));
+
+    expect(screen.getByText('••••••••')).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/contraseña actual/i)).not.toBeInTheDocument();
+  });
+
+  it('tecla Escape en modo editing vuelve a idle', async () => {
+    const user = userEvent.setup();
+    render(<ProfilePasswordField />);
+
+    await user.click(screen.getByRole('button', { name: /editar contraseña/i }));
+    expect(screen.getByPlaceholderText(/contraseña actual/i)).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    await waitFor(() => {
+      expect(screen.getByText('••••••••')).toBeInTheDocument();
+    });
+  });
+});
+```
+
+- [ ] **Step 2: Ejecutar — deben fallar**
+
+```bash
+npx vitest run src/components/ProfilePasswordField.test.jsx
+```
+
+Esperado: `FAILED` — el componente no existe.
+
+- [ ] **Step 3: Crear ProfilePasswordField.jsx**
+
+Crear `frontend/src/components/ProfilePasswordField.jsx`:
+
+```jsx
+import { useState, useEffect, useCallback } from 'react';
+import { changePassword } from '../api';
+
+const STATES = { idle: 'idle', editing: 'editing', saving: 'saving', success: 'success', error: 'error' };
+
+export default function ProfilePasswordField() {
+  const [editState, setEditState] = useState(STATES.idle);
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
+
+  const reset = useCallback(() => {
+    setEditState(STATES.idle);
+    setCurrent('');
+    setNext('');
+    setConfirm('');
+    setErrorMsg('');
+  }, []);
+
+  useEffect(() => {
+    if (editState !== STATES.editing) return;
+    const handleEsc = (e) => { if (e.key === 'Escape') reset(); };
+    document.addEventListener('keydown', handleEsc);
+    return () => document.removeEventListener('keydown', handleEsc);
+  }, [editState, reset]);
+
+  // Volver a idle automáticamente tras success
+  useEffect(() => {
+    if (editState !== STATES.success) return;
+    const t = setTimeout(reset, 2000);
+    return () => clearTimeout(t);
+  }, [editState, reset]);
+
+  async function handleSave(e) {
+    e.preventDefault();
+    if (editState === STATES.saving) return;
+    setEditState(STATES.saving);
+    setErrorMsg('');
+    try {
+      await changePassword(current, next);
+      setEditState(STATES.success);
+    } catch (err) {
+      setErrorMsg(err?.message || 'Error al cambiar la contraseña');
+      setEditState(STATES.error);
+    }
+  }
+
+  if (editState === STATES.idle) {
+    return (
+      <div className="flex items-center justify-between">
+        <span className="text-[13px] text-ink font-medium tracking-widest">••••••••</span>
+        <button
+          aria-label="Editar contraseña"
+          onClick={() => setEditState(STATES.editing)}
+          className="p-1 rounded text-ink-tertiary hover:text-[#5a9e8a] transition-colors"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+          </svg>
+        </button>
+      </div>
+    );
+  }
+
+  if (editState === STATES.success) {
+    return (
+      <div className="flex items-center gap-2 text-[#5a9e8a]">
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" />
+        </svg>
+        <span className="text-[13px] font-medium">Contraseña actualizada</span>
+      </div>
+    );
+  }
+
+  return (
+    <form onSubmit={handleSave} className="space-y-2.5 mt-1">
+      <input
+        type="password"
+        placeholder="Contraseña actual"
+        value={current}
+        onChange={(e) => setCurrent(e.target.value)}
+        disabled={editState === STATES.saving}
+        className="w-full px-3 py-2 text-[13px] border border-[#18181b]/[0.12] rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-[#5a9e8a] disabled:opacity-50"
+      />
+      <input
+        type="password"
+        placeholder="Nueva contraseña"
+        value={next}
+        onChange={(e) => setNext(e.target.value)}
+        disabled={editState === STATES.saving}
+        className="w-full px-3 py-2 text-[13px] border border-[#18181b]/[0.12] rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-[#5a9e8a] disabled:opacity-50"
+      />
+      <input
+        type="password"
+        placeholder="Confirmar nueva contraseña"
+        value={confirm}
+        onChange={(e) => setConfirm(e.target.value)}
+        disabled={editState === STATES.saving}
+        className="w-full px-3 py-2 text-[13px] border border-[#18181b]/[0.12] rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-[#5a9e8a] disabled:opacity-50"
+      />
+
+      {(editState === STATES.error) && errorMsg && (
+        <p className="text-[12px] text-red-500">{errorMsg}</p>
+      )}
+
+      <div className="flex gap-2 pt-1">
+        <button
+          type="submit"
+          aria-label="Guardar"
+          disabled={editState === STATES.saving}
+          className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-[#5a9e8a] text-white text-[12px] font-semibold rounded-lg hover:bg-[#4a8e7a] disabled:opacity-60 transition-colors"
+        >
+          {editState === STATES.saving ? (
+            <>
+              <div className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+              Guardando…
+            </>
+          ) : 'Guardar'}
+        </button>
+        <button
+          type="button"
+          aria-label="Cancelar"
+          onClick={reset}
+          disabled={editState === STATES.saving}
+          className="flex-1 py-2 text-[12px] text-[#71717a] border border-[#18181b]/[0.12] rounded-lg hover:bg-[#f4f4f2] disabled:opacity-40 transition-colors"
+        >
+          Cancelar
+        </button>
+      </div>
+    </form>
+  );
+}
+```
+
+- [ ] **Step 4: Ejecutar los tests — deben pasar**
+
+```bash
+npx vitest run src/components/ProfilePasswordField.test.jsx
+```
+
+Esperado: 6 tests `PASSED`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add frontend/src/components/ProfilePasswordField.jsx frontend/src/components/ProfilePasswordField.test.jsx
+git commit -m "feat(frontend): add ProfilePasswordField inline password edit component"
+```
+
+---
+
+## Task 9: Frontend — ProfileScreen.jsx
 
 **Files:**
 - Create: `frontend/src/components/ProfileScreen.jsx`
@@ -739,6 +1210,10 @@ vi.mock('../api', () => ({
 
 vi.mock('./UpdateCardModal', () => ({
   default: ({ open }) => open ? <div data-testid="update-card-modal" /> : null,
+}));
+
+vi.mock('./ProfilePasswordField', () => ({
+  default: () => <div data-testid="profile-password-field" />,
 }));
 
 import { getMyProfile, getBillingStatus } from '../api';
@@ -772,6 +1247,12 @@ describe('ProfileScreen', () => {
     });
   });
 
+  it('muestra el componente ProfilePasswordField en Card 1', async () => {
+    render(<ProfileScreen />);
+    await waitFor(() => screen.getByText('Dr. Test'));
+    expect(screen.getByTestId('profile-password-field')).toBeInTheDocument();
+  });
+
   it('muestra badge de plan activo y chip de tarjeta', async () => {
     render(<ProfileScreen />);
     await waitFor(() => {
@@ -802,6 +1283,14 @@ describe('ProfileScreen', () => {
     await waitFor(() => screen.getByText('Dr. Test'));
     expect(screen.queryByText(/Cambiar tarjeta/i)).not.toBeInTheDocument();
   });
+
+  it('estado courtesy muestra solo badge, sin chip ni botón cambiar tarjeta', async () => {
+    getBillingStatus.mockResolvedValue({ status: 'courtesy' });
+    render(<ProfileScreen />);
+    await waitFor(() => screen.getByText(/Acceso de Cortesía/i));
+    expect(screen.queryByText(/4242/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Cambiar tarjeta/i)).not.toBeInTheDocument();
+  });
 });
 ```
 
@@ -821,6 +1310,7 @@ Crear `frontend/src/components/ProfileScreen.jsx`:
 import { useState, useEffect } from 'react';
 import { getMyProfile, getBillingStatus } from '../api';
 import UpdateCardModal from './UpdateCardModal';
+import ProfilePasswordField from './ProfilePasswordField';
 
 const BRAND_LABELS = { visa: 'VISA', mastercard: 'MC', amex: 'AMEX', discover: 'DISC' };
 
@@ -846,6 +1336,7 @@ function PlanBadge({ status }) {
     past_due: 'bg-[#fef2f2] text-red-500',
     canceled: 'bg-[#fef2f2] text-red-500',
     unpaid: 'bg-[#fef2f2] text-red-500',
+    courtesy: 'bg-[#f4f4f2] text-[#71717a]',
   };
   const labels = {
     active: 'Plan Pro — Activo',
@@ -853,6 +1344,7 @@ function PlanBadge({ status }) {
     past_due: 'Pago pendiente',
     canceled: 'Suscripción cancelada',
     unpaid: 'Pago pendiente',
+    courtesy: 'Acceso de Cortesía',
   };
   return (
     <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold ${variants[status] || variants.canceled}`}>
@@ -888,8 +1380,6 @@ export default function ProfileScreen() {
   }, []);
 
   const handleCardSuccess = () => {
-    // No cerrar el modal aquí — UpdateCardModal muestra el estado de éxito
-    // y el usuario lo cierra con el botón "Listo" (que llama onClose)
     getBillingStatus().then(setBilling);
   };
 
@@ -901,7 +1391,7 @@ export default function ProfileScreen() {
     );
   }
 
-  const canChangeCard = billing?.status === 'active';
+  const canChangeCard = billing?.status === 'active' && billing?.payment_method;
   const showNextBilling = billing?.status === 'active' && !billing?.cancel_at_period_end && billing?.current_period_end;
 
   return (
@@ -928,6 +1418,12 @@ export default function ProfileScreen() {
             <div className="px-4 py-4">
               <FieldRow label="Nombre" value={profile?.name} />
               <FieldRow label="Correo electrónico" value={profile?.email} />
+              <div className="mb-4">
+                <div className="text-[10px] font-semibold text-ink-tertiary uppercase tracking-widest mb-1">
+                  Contraseña
+                </div>
+                <ProfilePasswordField />
+              </div>
               <FieldRow label="Cédula profesional" value={profile?.cedula_profesional} />
             </div>
           </div>
@@ -996,18 +1492,18 @@ export default function ProfileScreen() {
 npx vitest run src/components/ProfileScreen.test.jsx
 ```
 
-Esperado: 5 tests `PASSED`.
+Esperado: 7 tests `PASSED`.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add frontend/src/components/ProfileScreen.jsx frontend/src/components/ProfileScreen.test.jsx
-git commit -m "feat(frontend): add ProfileScreen component"
+git commit -m "feat(frontend): add ProfileScreen with ProfilePasswordField integration"
 ```
 
 ---
 
-## Task 8: Frontend — UpdateCardModal.jsx
+## Task 10: Frontend — UpdateCardModal.jsx
 
 **Files:**
 - Create: `frontend/src/components/UpdateCardModal.jsx`
@@ -1283,7 +1779,6 @@ export default function UpdateCardModal({ open, onClose, onSuccess }) {
         className="w-full max-w-sm bg-white rounded-2xl shadow-2xl overflow-hidden"
         onClick={e => e.stopPropagation()}
       >
-        {/* Header */}
         {!succeeded && (
           <div className="flex items-center justify-between px-5 py-4 border-b border-[#18181b]/[0.06]">
             <h3 className="text-[14px] font-bold text-[#18181b]">Cambiar método de pago</h3>
@@ -1298,7 +1793,6 @@ export default function UpdateCardModal({ open, onClose, onSuccess }) {
           </div>
         )}
 
-        {/* Content */}
         {succeeded ? (
           <SuccessState onClose={onClose} />
         ) : loadingSecret || !clientSecret ? (
@@ -1326,7 +1820,7 @@ export default function UpdateCardModal({ open, onClose, onSuccess }) {
 npx vitest run src/components/UpdateCardModal.test.jsx
 ```
 
-Esperado: 6 tests `PASSED`.
+Esperado: 7 tests `PASSED`.
 
 - [ ] **Step 5: Commit**
 
@@ -1337,7 +1831,7 @@ git commit -m "feat(frontend): add UpdateCardModal with embedded Stripe PaymentE
 
 ---
 
-## Task 9: Frontend — App.jsx wiring
+## Task 11: Frontend — App.jsx wiring
 
 **Files:**
 - Modify: `frontend/src/App.jsx`
@@ -1372,11 +1866,6 @@ Localizar el bloque del sidebar desktop (líneas ~944-976):
 <div className="border-t border-ink/[0.07] p-3 flex-shrink-0 flex flex-col gap-1">
   <button
     onClick={() => setActiveSection(activeSection === 'agenda' ? 'patients' : 'agenda')}
-    className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-colors ${activeSection === 'agenda'
-      ? 'bg-[#5a9e8a]/10 text-[#5a9e8a]'
-      : 'text-ink-secondary hover:bg-ink/[0.04] hover:text-ink'
-      }`}
-  >
     ...Mi Agenda...
   </button>
   <button
@@ -1430,6 +1919,8 @@ npm run dev
 Abrir `http://localhost:5173` (o el puerto que use Vite). Navegar a:
 - Tab "Perfil" en móvil → debe mostrar la pantalla de perfil
 - Botón "Mi Perfil" en desktop → debe activarse en el sidebar
+- Click en lápiz de contraseña → expande los tres inputs
+- Badge "Acceso de Cortesía" para usuarios sin Stripe
 
 Verificar en consola del navegador que no hay errores JS.
 
@@ -1442,7 +1933,7 @@ git commit -m "feat(frontend): wire ProfileScreen into navigation (mobile tab + 
 
 ---
 
-## Task 10: Suite completa + PR
+## Task 12: Suite completa + PR
 
 - [ ] **Step 1: Ejecutar todos los tests del frontend**
 
@@ -1469,13 +1960,17 @@ Con Docker corriendo (`docker-compose up -d postgres`), backend y frontend en ma
 1. Login como psicólogo con suscripción activa
 2. Click en tab "Perfil" (móvil) o botón "Mi Perfil" (desktop)
 3. Verificar que aparecen nombre, email y cédula
-4. Verificar que aparece el badge "Plan Pro — Activo" y la tarjeta actual
-5. Click en "Cambiar tarjeta"
-6. Ingresar `4242 4242 4242 4242`, fecha futura, CVC cualquiera
-7. Click "Guardar tarjeta"
-8. Verificar que aparece la pantalla de éxito
-9. Verificar en terminal del `stripe listen` que llega el evento `setup_intent.succeeded`
-10. Verificar que el chip de tarjeta en el perfil refleja la nueva tarjeta (puede requerir recargar el perfil)
+4. Click en el ícono lápiz de Contraseña → deben aparecer los tres inputs
+5. Ingresar contraseña actual correcta + nueva contraseña válida → debe mostrar checkmark verde
+6. Ingresar contraseña actual incorrecta → debe mostrar error inline, campos siguen visibles
+7. Verificar que el badge "Acceso de Cortesía" aparece para usuarios sin Stripe
+8. Verificar que el badge "Plan Pro — Activo" y la tarjeta aparecen para usuarios con suscripción activa
+9. Click en "Cambiar tarjeta"
+10. Ingresar `4242 4242 4242 4242`, fecha futura, CVC cualquiera
+11. Click "Guardar tarjeta"
+12. Verificar que aparece la pantalla de éxito
+13. Verificar en terminal del `stripe listen` que llega el evento `setup_intent.succeeded`
+14. Verificar que el chip de tarjeta en el perfil refleja la nueva tarjeta (puede requerir recargar el perfil)
 
 - [ ] **Step 4: Push y PR**
 
@@ -1483,4 +1978,4 @@ Con Docker corriendo (`docker-compose up -d postgres`), backend y frontend en ma
 git push -u origin feature/psic-profile
 ```
 
-Abrir PR hacia `dev` con título: `feat: perfil del psicólogo + actualización de tarjeta con Stripe Elements`.
+Abrir PR hacia `dev` con título: `feat: perfil del psicólogo + cambio de contraseña inline + actualización de tarjeta con Stripe Elements`.

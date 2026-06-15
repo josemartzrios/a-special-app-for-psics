@@ -8,7 +8,7 @@
 
 ## Resumen
 
-Añadir una sección "Mi Perfil" a la app del psicólogo, accesible desde un nuevo tab en la navegación (BottomNav móvil + botón en sidebar desktop). Muestra datos personales de solo lectura y el estado de suscripción, con un modal embebido de Stripe para cambiar el método de pago sin salir de la app. El campo Contraseña es editable inline (expansión en Card 1) mediante un nuevo endpoint `POST /auth/change-password` que requiere la contraseña actual. Los usuarios de cortesía (acceso activo sin suscripción Stripe) ven un estado diferenciado en Card 2 sin opciones de pago.
+Añadir una sección "Mi Perfil" a la app del psicólogo, accesible desde un nuevo tab en la navegación (BottomNav móvil + botón en sidebar desktop). Muestra datos personales de solo lectura, excepto la contraseña, y el estado de suscripción, con un modal embebido de Stripe para cambiar el método de pago sin salir de la app. El campo Contraseña es editable inline (expansión en Card 1) mediante un nuevo endpoint `POST /auth/change-password` que requiere la contraseña actual. Los usuarios de cortesía (acceso activo sin suscripción Stripe) ven un estado diferenciado en Card 2 sin opciones de pago.
 
 ---
 
