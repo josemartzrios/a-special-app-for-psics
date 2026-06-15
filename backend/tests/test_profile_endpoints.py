@@ -7,6 +7,7 @@ with patch("database.init_db", new=AsyncMock()):
 
 from fastapi.testclient import TestClient
 from api.auth import get_current_psychologist
+from database import get_db
 
 
 def _mock_psych(**kwargs):
@@ -59,4 +60,73 @@ def test_get_me_null_cedula():
 def test_get_me_requires_auth():
     with TestClient(app) as client:
         resp = client.get("/api/v1/auth/me")
+    assert resp.status_code == 401
+
+
+def test_change_password_success():
+    psych = _mock_psych()
+    psych.password_hash = "hashed_old"
+    app.dependency_overrides[get_current_psychologist] = lambda: psych
+
+    async def override_get_db():
+        db = AsyncMock()
+        db.commit = AsyncMock()
+        db.add = MagicMock()
+        yield db
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    with patch("api.auth.verify_password", return_value=True), \
+         patch("api.auth.hash_password", return_value="hashed_new"):
+        with TestClient(app) as client:
+            resp = client.post(
+                "/api/v1/auth/change-password",
+                json={"current_password": "OldPass123!", "new_password": "NewPass456!"},
+            )
+
+    app.dependency_overrides.clear()
+
+    assert resp.status_code == 204
+    assert psych.password_hash == "hashed_new"
+
+
+def test_change_password_wrong_current():
+    psych = _mock_psych()
+    app.dependency_overrides[get_current_psychologist] = lambda: psych
+
+    with patch("api.auth.verify_password", return_value=False):
+        with TestClient(app) as client:
+            resp = client.post(
+                "/api/v1/auth/change-password",
+                json={"current_password": "WrongPass!", "new_password": "NewPass456!"},
+            )
+
+    app.dependency_overrides.clear()
+
+    assert resp.status_code == 400
+    assert "incorrecta" in resp.json()["detail"].lower()
+
+
+def test_change_password_policy_violation():
+    psych = _mock_psych()
+    app.dependency_overrides[get_current_psychologist] = lambda: psych
+
+    with patch("api.auth.verify_password", return_value=True):
+        with TestClient(app) as client:
+            resp = client.post(
+                "/api/v1/auth/change-password",
+                json={"current_password": "OldPass123!", "new_password": "weak"},
+            )
+
+    app.dependency_overrides.clear()
+
+    assert resp.status_code == 422
+
+
+def test_change_password_requires_auth():
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/v1/auth/change-password",
+            json={"current_password": "OldPass123!", "new_password": "NewPass456!"},
+        )
     assert resp.status_code == 401

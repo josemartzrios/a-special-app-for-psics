@@ -72,6 +72,15 @@ class ResetPasswordRequest(BaseModel):
     def password_strength(cls, v):
         return validate_password(v)
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+    @field_validator('new_password')
+    @classmethod
+    def password_strength(cls, v):
+        return validate_password(v)
+
 logger = logging.getLogger("syquex.auth")
 
 # ---------------------------------------------------------------------------
@@ -112,7 +121,7 @@ def _set_refresh_cookie(response: Response, raw_token: str) -> None:
     )
 
 # ---------------------------------------------------------------------------
-# Brute-force protection (in-memory — reemplazar con Redis en producción)
+# Brute-force protection 
 # ---------------------------------------------------------------------------
 
 _MAX_ATTEMPTS = 5
@@ -542,3 +551,16 @@ async def get_me(
         "email": psychologist.email,
         "cedula_profesional": psychologist.cedula_profesional,
     }
+
+
+@router.post("/change-password", status_code=204)
+async def change_password(
+    body: ChangePasswordRequest,
+    psychologist=Depends(get_current_psychologist),
+    db: AsyncSession = Depends(get_db),
+):
+    if not verify_password(body.current_password, psychologist.password_hash):
+        raise HTTPException(status_code=400, detail="Contraseña actual incorrecta")
+    psychologist.password_hash = hash_password(body.new_password)
+    db.add(AuditLog(psychologist_id=psychologist.id, action="password_changed"))
+    await db.commit()
