@@ -530,3 +530,15 @@ async def reset_password(
     response = JSONResponse(content=TokenResponse(access_token=access_token).model_dump())
     _set_refresh_cookie(response, raw_refresh)
     return response
+
+
+@router.get("/me")
+async def get_me(
+    psychologist=Depends(get_current_psychologist),
+):
+    return {
+        "id": str(psychologist.id),
+        "name": psychologist.name,
+        "email": psychologist.email,
+        "cedula_profesional": psychologist.cedula_profesional,
+    }
