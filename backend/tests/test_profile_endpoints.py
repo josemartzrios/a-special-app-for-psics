@@ -130,3 +130,32 @@ def test_change_password_requires_auth():
             json={"current_password": "OldPass123!", "new_password": "NewPass456!"},
         )
     assert resp.status_code == 401
+
+
+def test_create_setup_intent_returns_client_secret():
+    psych = _mock_psych()
+    app.dependency_overrides[get_current_psychologist] = lambda: psych
+
+    mock_si = MagicMock()
+    mock_si.client_secret = "seti_test_secret_xyz"
+
+    with patch("api.billing.stripe.SetupIntent.create", return_value=mock_si):
+        with TestClient(app) as client:
+            resp = client.post("/api/v1/billing/setup-intent")
+
+    app.dependency_overrides.clear()
+
+    assert resp.status_code == 200
+    assert resp.json()["client_secret"] == "seti_test_secret_xyz"
+
+
+def test_create_setup_intent_no_stripe_customer():
+    psych = _mock_psych(stripe_customer_id=None)
+    app.dependency_overrides[get_current_psychologist] = lambda: psych
+
+    with TestClient(app) as client:
+        resp = client.post("/api/v1/billing/setup-intent")
+
+    app.dependency_overrides.clear()
+
+    assert resp.status_code == 400

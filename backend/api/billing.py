@@ -194,3 +194,21 @@ async def cancel_subscription(
         "cancel_at_period_end": True,
         "current_period_end": sub.current_period_end,
     }
+
+
+@router.post("/setup-intent")
+async def create_setup_intent(
+    psychologist=Depends(get_current_psychologist),
+):
+    if not psychologist.stripe_customer_id:
+        raise HTTPException(status_code=400, detail="No hay cuenta de facturación configurada")
+    try:
+        setup_intent = stripe.SetupIntent.create(
+            customer=psychologist.stripe_customer_id,
+            payment_method_types=["card"],
+            usage="off_session",
+        )
+        return {"client_secret": setup_intent.client_secret}
+    except Exception as e:
+        logger.error("Stripe setup intent error: %s", e, exc_info=True)
+        raise HTTPException(status_code=502, detail="Error al comunicarse con Stripe")
