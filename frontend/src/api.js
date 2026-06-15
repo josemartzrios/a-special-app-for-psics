@@ -274,6 +274,21 @@ export async function cancelSubscription() {
   return _authFetch(`${API_BASE}/billing/cancel`, { method: 'POST' });
 }
 
+export async function getMyProfile() {
+  return _authFetch(`${API_BASE}/auth/me`);
+}
+
+export async function changePassword(currentPassword, newPassword) {
+  return _authFetch(`${API_BASE}/auth/change-password`, {
+    method: 'POST',
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+  });
+}
+
+export async function createSetupIntent() {
+  return _authFetch(`${API_BASE}/billing/setup-intent`, { method: 'POST' });
+}
+
 // --- Patient Summaries (psychologist side) ---
 export async function getSummary(sessionId) {
   return _authFetch(`${API_BASE}/sessions/${sessionId}/summary`);
