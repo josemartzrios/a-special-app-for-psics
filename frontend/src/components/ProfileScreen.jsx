@@ -87,13 +87,13 @@ export default function ProfileScreen() {
 
   return (
     <div className="flex-1 overflow-y-auto bg-[#fefcfb]">
-      <div className="max-w-3xl mx-auto px-6 md:px-8 py-6 md:py-8">
+      <div className="max-w-5xl mx-auto px-6 md:px-8 py-6 md:py-8">
         <div className="mb-6 pb-4 border-b border-[#18181b]/[0.06]">
           <h2 className="text-xl font-bold text-[#18181b]">Mi Perfil</h2>
           <p className="text-sm text-[#71717a] mt-1">Información de tu cuenta y suscripción</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 md:gap-6">
           <div className="bg-white border border-[#18181b]/[0.08] rounded-xl overflow-hidden">
             <div className="flex items-center gap-2.5 px-4 py-3.5 border-b border-[#18181b]/[0.05]">
               <div className="w-7 h-7 rounded-lg bg-[#5a9e8a]/10 flex items-center justify-center flex-shrink-0">
