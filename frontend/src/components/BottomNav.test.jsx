@@ -22,4 +22,16 @@ describe('BottomNav', () => {
     fireEvent.click(screen.getByText('Agenda').closest('button'));
     expect(onChange).toHaveBeenCalledWith('agenda');
   });
+
+  it('renders Perfil tab', () => {
+    render(<BottomNav activeSection="patients" onSectionChange={() => {}} />);
+    expect(screen.getByText('Perfil')).toBeInTheDocument();
+  });
+
+  it('calls onSectionChange with "profile" when Perfil tab is clicked', () => {
+    const onChange = vi.fn();
+    render(<BottomNav activeSection="patients" onSectionChange={onChange} />);
+    fireEvent.click(screen.getByText('Perfil').closest('button'));
+    expect(onChange).toHaveBeenCalledWith('profile');
+  });
 });
