@@ -146,22 +146,174 @@ class TestWorkerProcessSingleJob:
         assert mock_db.commit.called
 
 
-class TestWorkerBatchPick:
-    async def test_no_pending_jobs_returns_immediately(self):
-        mock_db = AsyncMock()
-        mock_result = MagicMock()
-        mock_result.fetchall.return_value = []
-        mock_db.execute = AsyncMock(return_value=mock_result)
-        mock_db.rollback = AsyncMock()
-        mock_db.commit = AsyncMock()
+class TestClaimPendingJobs:
+    """The polling claim runs on an injected long-lived connection (egress fix)."""
 
-        with patch("agent.worker.AsyncSessionLocal") as mock_session_factory:
-            mock_ctx = AsyncMock()
-            mock_ctx.__aenter__ = AsyncMock(return_value=mock_db)
-            mock_ctx.__aexit__ = AsyncMock(return_value=False)
-            mock_session_factory.return_value = mock_ctx
+    async def test_no_pending_jobs_rolls_back_and_returns_empty(self):
+        conn = AsyncMock()
+        conn.execute = AsyncMock(
+            return_value=MagicMock(fetchall=MagicMock(return_value=[]))
+        )
+        conn.rollback = AsyncMock()
+        conn.commit = AsyncMock()
 
-            from agent.worker import _process_batch
-            await _process_batch()
+        from agent.worker import _claim_pending_jobs
+        result = await _claim_pending_jobs(conn)
 
-        assert not mock_db.commit.called
+        assert result == []
+        assert conn.rollback.called
+        assert not conn.commit.called
+
+    async def test_pending_jobs_marked_processing_and_committed(self):
+        jid = uuid.uuid4()
+        conn = AsyncMock()
+        conn.execute = AsyncMock(
+            return_value=MagicMock(fetchall=MagicMock(return_value=[(jid,)]))
+        )
+        conn.rollback = AsyncMock()
+        conn.commit = AsyncMock()
+
+        from agent.worker import _claim_pending_jobs
+        result = await _claim_pending_jobs(conn)
+
+        assert result == [jid]
+        assert conn.commit.called
+        # SELECT ... FOR UPDATE + UPDATE = two statements on the same connection
+        assert conn.execute.await_count == 2
+
+
+class TestWorkerPersistentConnection:
+    """Egress fix: the poll loop must reuse ONE connection, not open one per poll."""
+
+    async def test_polling_reuses_single_connection(self):
+        mock_conn = AsyncMock()
+        mock_conn.closed = False
+        mock_conn.execute = AsyncMock(
+            return_value=MagicMock(fetchall=MagicMock(return_value=[]))
+        )
+        mock_conn.rollback = AsyncMock()
+        mock_conn.commit = AsyncMock()
+
+        connect_calls = 0
+
+        async def fake_connect():
+            nonlocal connect_calls
+            connect_calls += 1
+            return mock_conn
+
+        mock_engine = MagicMock()
+        mock_engine.connect = fake_connect
+
+        sleep_count = 0
+
+        async def fake_sleep(_):
+            nonlocal sleep_count
+            sleep_count += 1
+            if sleep_count >= 3:
+                raise asyncio.CancelledError()
+
+        with patch("agent.worker.engine", mock_engine), \
+             patch("agent.worker.asyncio.sleep", side_effect=fake_sleep):
+            from agent.worker import job_worker
+            with pytest.raises(asyncio.CancelledError):
+                await job_worker()
+
+        # One TLS connection for all polls — this is the egress fix
+        assert connect_calls == 1
+        assert mock_conn.execute.await_count >= 3
+
+    async def test_connection_recycled_after_max_age(self):
+        # A connection older than _CONN_MAX_AGE must be closed and replaced,
+        # even with no error — pre-empts Supabase's server-side connection reaping.
+        import agent.worker as worker_mod
+
+        old_conn = AsyncMock()
+        old_conn.closed = False
+        old_conn.execute = AsyncMock(
+            return_value=MagicMock(fetchall=MagicMock(return_value=[]))
+        )
+        old_conn.rollback = AsyncMock()
+        old_conn.close = AsyncMock()
+
+        new_conn = AsyncMock()
+        new_conn.closed = False
+        new_conn.execute = AsyncMock(
+            return_value=MagicMock(fetchall=MagicMock(return_value=[]))
+        )
+        new_conn.rollback = AsyncMock()
+
+        conns = [old_conn, new_conn]
+
+        async def fake_connect():
+            return conns.pop(0)
+
+        mock_engine = MagicMock()
+        mock_engine.connect = fake_connect
+
+        # monotonic() is only called on connect (set conn_opened_at) and on the
+        # age check (skipped while conn is None). Sequence:
+        #   iter1 connect -> 0.0 ; iter2 age check -> aged-out ; iter2 reconnect.
+        times = iter([0.0, worker_mod._CONN_MAX_AGE + 1, worker_mod._CONN_MAX_AGE + 1])
+
+        def fake_monotonic():
+            try:
+                return next(times)
+            except StopIteration:
+                return worker_mod._CONN_MAX_AGE + 100
+
+        sleep_count = 0
+
+        async def fake_sleep(_):
+            nonlocal sleep_count
+            sleep_count += 1
+            if sleep_count >= 2:
+                raise asyncio.CancelledError()
+
+        with patch("agent.worker.engine", mock_engine), \
+             patch("agent.worker.time.monotonic", side_effect=fake_monotonic), \
+             patch("agent.worker.asyncio.sleep", side_effect=fake_sleep):
+            from agent.worker import job_worker
+            with pytest.raises(asyncio.CancelledError):
+                await job_worker()
+
+        old_conn.close.assert_awaited()       # aged-out connection recycled
+        new_conn.execute.assert_awaited()     # replacement polled
+
+    async def test_error_drops_connection_and_reconnects(self):
+        bad_conn = AsyncMock()
+        bad_conn.closed = False
+        bad_conn.execute = AsyncMock(side_effect=Exception("connection lost"))
+        bad_conn.close = AsyncMock()
+
+        good_conn = AsyncMock()
+        good_conn.closed = False
+        good_conn.execute = AsyncMock(
+            return_value=MagicMock(fetchall=MagicMock(return_value=[]))
+        )
+        good_conn.rollback = AsyncMock()
+
+        conns = [bad_conn, good_conn]
+
+        async def fake_connect():
+            return conns.pop(0)
+
+        mock_engine = MagicMock()
+        mock_engine.connect = fake_connect
+
+        sleep_count = 0
+
+        async def fake_sleep(_):
+            nonlocal sleep_count
+            sleep_count += 1
+            if sleep_count >= 2:
+                raise asyncio.CancelledError()
+
+        with patch("agent.worker.engine", mock_engine), \
+             patch("agent.worker.asyncio.sleep", side_effect=fake_sleep):
+            from agent.worker import job_worker
+            with pytest.raises(asyncio.CancelledError):
+                await job_worker()
+
+        # Broken connection closed, then a fresh one opened and polled
+        bad_conn.close.assert_awaited()
+        good_conn.execute.assert_awaited()
