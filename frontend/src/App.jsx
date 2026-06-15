@@ -24,6 +24,7 @@ import CancelSubscriptionModal from './components/CancelSubscriptionModal';
 import PatientInviteModal from './components/PatientInviteModal';
 import PatientSummarySection from './components/PatientSummarySection';
 import CalendarScreen from './components/CalendarScreen';
+import ProfileScreen from './components/ProfileScreen';
 import BottomNav from './components/BottomNav';
 import PatientLogin from './pages/PatientLogin';
 import PatientInviteAccept from './pages/PatientInviteAccept';
@@ -955,6 +956,18 @@ function App() {
               Mi Agenda
             </button>
             <button
+              onClick={() => setActiveSection('profile')}
+              className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-colors ${activeSection === 'profile'
+                ? 'bg-[#5a9e8a]/10 text-[#5a9e8a]'
+                : 'text-ink-secondary hover:bg-ink/[0.04] hover:text-ink'
+                }`}
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.75" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+              </svg>
+              Mi Perfil
+            </button>
+            <button
               onClick={handleLogout}
               className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-colors text-ink-secondary hover:bg-ink/[0.04] hover:text-ink"
             >
@@ -1626,6 +1639,12 @@ function App() {
                 <CalendarScreen key={agendaCalendarKey} mode="inline" onClose={() => { }} />
               </div>
             )}
+          </div>
+        )}
+
+        {activeSection === 'profile' && (
+          <div className="flex flex-col flex-1 min-h-0">
+            <ProfileScreen />
           </div>
         )}
 
