@@ -31,6 +31,17 @@ def _cors_headers(request: Request) -> dict:
     return {}
 
 
+# Configura el logging raíz para que los loggers de la app (syquex, agent.worker,
+# ...) sean visibles en la salida de uvicorn/Railway. Sin esto, los logger.info()
+# de la app caen en el handler "last resort" de Python, que solo emite WARNING+ —
+# por eso "Job worker started" nunca aparecía. uvicorn conserva sus propios loggers
+# (disable_existing_loggers=False), así que esto no pisa los logs de acceso.
+_LOG_LEVEL = logging.DEBUG if settings.ENVIRONMENT == "development" else logging.INFO
+logging.basicConfig(
+    level=_LOG_LEVEL,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
+
 logger = logging.getLogger("syquex")
 
 # Deshabilitar docs automáticos en staging y producción

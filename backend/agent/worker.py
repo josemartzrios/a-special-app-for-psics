@@ -1,13 +1,14 @@
 import asyncio
 import logging
 import json as _json
+import time
 from datetime import date, datetime, timezone
 from typing import Optional
 import uuid
 
 from sqlalchemy import text, select
 
-from database import AsyncSessionLocal, JobQueue, Session, Patient
+from database import engine, AsyncSessionLocal, JobQueue, Session, Patient
 from config import settings
 from crypto import encrypt_if_set, decrypt_if_set
 from agent import process_session, process_session_custom
@@ -17,52 +18,97 @@ logger = logging.getLogger(__name__)
 UTC = timezone.utc
 
 _MAX_ATTEMPTS = 3
-_POLL_INTERVAL = 0.5  # seconds between batch polls
+_POLL_INTERVAL = 2.0  # seconds between batch polls
 _429_BACKOFF = [30, 60, 120]  # seconds
+# Proactively recycle the polling connection so it never outlives Supabase's
+# server-side connection lifetime. This is the pool_recycle equivalent for a
+# connection held outside the pool — pool_pre_ping/pool_recycle on the engine
+# do NOT cover a Connection that is checked out once and held.
+_CONN_MAX_AGE = 1500.0  # seconds (25 min)
 
 
 async def job_worker() -> None:
-    """Asyncio background task: polls DB for pending jobs and processes them."""
+    """Asyncio background task: polls DB for pending jobs and processes them.
+
+    The polling SELECT runs on a single long-lived ``engine.connect()`` connection
+    that is reused across every poll. With ``NullPool`` (required for Supabase's
+    pgBouncer pooler) a new ``AsyncSessionLocal()`` per poll would open a brand-new
+    TLS connection each time; at ~2 polls/s that meant ~170k handshakes/day, whose
+    certificate + startup bytes dominated Supabase egress (~491 MB/day on an idle
+    queue). A ``Connection`` keeps its physical DBAPI connection for its whole
+    lifetime — ``commit()``/``rollback()`` manage transactions without returning it
+    to the pool — so the TLS handshake happens once, not once per poll.
+
+    Resilience for that held connection comes from two mechanisms, not from the
+    engine pool: reconnect-on-error (a dead connection raises on next execute and
+    is rebuilt next cycle) and proactive age-based recycling (``_CONN_MAX_AGE``).
+    """
     logger.info("Job worker started (concurrency=%d)", settings.WORKER_CONCURRENCY)
+    conn = None
+    conn_opened_at = 0.0
     while True:
         try:
-            await _process_batch()
+            # Proactive recycle before the connection can be reaped server-side.
+            if conn is not None and time.monotonic() - conn_opened_at >= _CONN_MAX_AGE:
+                conn = await _close_quietly(conn)
+            if conn is None or conn.closed:
+                conn = await engine.connect()
+                conn_opened_at = time.monotonic()
+            job_ids = await _claim_pending_jobs(conn)
+            if job_ids:
+                await asyncio.gather(*[_process_single_job(jid) for jid in job_ids])
         except Exception as exc:
             logger.error("Worker batch error: %s", exc, exc_info=True)
+            # The polling connection may be dead (idle timeout, network blip).
+            # Drop it so the next iteration opens a fresh one.
+            conn = await _close_quietly(conn)
         await asyncio.sleep(_POLL_INTERVAL)
 
 
-async def _process_batch() -> None:
-    """Pick up to WORKER_CONCURRENCY pending jobs, mark them processing, then process in parallel."""
-    async with AsyncSessionLocal() as db:
-        res = await db.execute(
-            text("""
-                SELECT id FROM job_queue
-                WHERE status = 'pending'
-                ORDER BY created_at
-                LIMIT :limit
-                FOR UPDATE SKIP LOCKED
-            """),
-            {"limit": settings.WORKER_CONCURRENCY},
-        )
-        job_ids = [row[0] for row in res.fetchall()]
-        if not job_ids:
-            await db.rollback()
-            return
+async def _close_quietly(conn):
+    """Close a connection without raising; return None for reassignment."""
+    if conn is not None:
+        try:
+            await conn.close()
+        except Exception:
+            pass
+    return None
 
-        await db.execute(
-            text("""
-                UPDATE job_queue
-                SET status = 'processing',
-                    attempts = attempts + 1,
-                    updated_at = NOW()
-                WHERE id = ANY(:ids)
-            """),
-            {"ids": job_ids},
-        )
-        await db.commit()
 
-    await asyncio.gather(*[_process_single_job(jid) for jid in job_ids])
+async def _claim_pending_jobs(conn) -> list:
+    """Atomically pick up to WORKER_CONCURRENCY pending jobs and mark them processing.
+
+    Runs on the long-lived polling connection. The SELECT ... FOR UPDATE SKIP LOCKED
+    and the UPDATE share one transaction, committed per cycle so row locks are not
+    held between polls.
+    """
+    res = await conn.execute(
+        text("""
+            SELECT id FROM job_queue
+            WHERE status = 'pending'
+            ORDER BY created_at
+            LIMIT :limit
+            FOR UPDATE SKIP LOCKED
+        """),
+        {"limit": settings.WORKER_CONCURRENCY},
+    )
+    job_ids = [row[0] for row in res.fetchall()]
+    if not job_ids:
+        await conn.rollback()
+        return []
+
+    await conn.execute(
+        text("""
+            UPDATE job_queue
+            SET status = 'processing',
+                attempts = attempts + 1,
+                updated_at = NOW()
+            WHERE id = ANY(:ids)
+        """),
+        {"ids": job_ids},
+    )
+    await conn.commit()
+    return job_ids
 
 
 async def _process_single_job(job_id: uuid.UUID) -> None:
