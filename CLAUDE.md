@@ -241,7 +241,33 @@ Al completar cualquier feature antes del merge a `dev`, actualiza la documentaci
 
 Para diagramas usa Mermaid. Actualiza siempre el campo `Last Updated` del documento afectado.
 
-Haz pruebas unitarias de cada cambio que realices en el backend y frontend y asegúrate de que todo funcione correctamente.
+## Testing (OBLIGATORIO)
+
+Hay **dos niveles de prueba** y cubren cosas distintas. La regla no es "siempre escribe ambos a ciegas", sino **extrae la lógica del endpoint y prueba cada nivel donde corresponde**:
+
+| Nivel | Qué verifica | Cómo se ve | Cuándo |
+|-------|--------------|------------|--------|
+| **Unit** (función pura) | Que **la lógica es correcta** — ramas, cálculos, transformaciones, validaciones | Llama la función directamente. **No menciona `TestClient` ni HTTP.** Mockea dependencias con la misma firma (DI/Liskov). Ej: `_build_billing_status(sub, psy)` en `test_billing_status.py` | Siempre que haya lógica de negocio extraíble del handler |
+| **Controller** (integration-lite) | Que **la lógica está bien cableada al endpoint** — routing, `Depends`, status codes, serialización, auth | `TestClient(app)` / `AsyncClient(ASGITransport(app))` con `dependency_overrides` para `get_db` y `get_current_psychologist`; `patch` para Stripe/Resend. Ej: `test_profile_endpoints.py` | Siempre que toques un endpoint |
+
+> **Importante:** estos controller tests **no son integration tests reales** — no tocan Postgres ni Stripe de verdad, todo lo externo está mockeado. Ejercitan el stack de FastAPI excepto las capas externas. No los confundas con pruebas end-to-end.
+
+**Principio que conecta ambos (SOLID → testabilidad):** solo puedes hacer unit test de lógica que vive **fuera** del endpoint. Si metes la lógica inline en el handler, tu única opción es probarla atravesando todo el stack HTTP (controller test), que es más lento y oscuro. **Extrae la lógica a una función pura (SRP) y ese acto habilita el unit test.** Ejemplo real: al refactorizar `billing.py` extrajimos `_build_billing_status`, `_handle_*`, `_trial_days_remaining`, `_fetch_payment_method` — eso es lo que hizo posible `test_billing_status.py`.
+
+**Qué escribir según el cambio:**
+- Endpoint que solo lee campos y los devuelve (`GET /auth/me`) → **solo controller test**; no hay lógica que aislar, un "unit test" sería artificial.
+- Endpoint con ramas/cálculos/decisiones (`/status`, webhook dispatch) → **unit test de la función extraída + controller test del wiring**.
+- Validación, formato o transformación → **unit test** de esa función.
+- Frontend: lógica de componente (estados, handlers) → test con `@testing-library/react` + `vi.mock('../api')`.
+
+**Reglas operativas:**
+- Cada cambio incluye al menos: happy path + un caso de error (ver `skills/best-practices.md` § Checklist pre-PR).
+- Backend: `cd backend && python -m pytest -q` debe pasar **completo** (no solo el archivo tocado) — las fallas de aislamiento solo aparecen en el suite entero.
+- Si refactorizas un endpoint, corre su controller test existente; es el que detecta si rompiste el contrato HTTP.
+
+**Trampas conocidas de la suite (no reintroducir):**
+- `with TestClient(app) as client:` dispara el lifespan `startup_event` de `main.py`, que llama `init_db()` (conexión real a Postgres). Como `app` es un singleton cacheado en `sys.modules`, parchear `init_db` solo en el import es frágil: depende del orden en que los archivos importen `main`. **`init_db` se neutraliza globalmente en `backend/tests/conftest.py` (`_database.init_db = AsyncMock()`) — no quitar esa línea.**
+- En mocks de sesión, `db.add` debe ser `MagicMock()` y no `AsyncMock()`: `Session.add` es síncrono. Un `AsyncMock` genera `RuntimeWarning: coroutine never awaited`. El `mock_db` compartido de `conftest.py` ya lo hace bien; replícalo en fixtures locales.
 
 Sigue los skills del proyecto @skills/security.md y @skills/clinic/agent-clinic.md y @skills/best-practices.md
 

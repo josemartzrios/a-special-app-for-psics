@@ -16,6 +16,7 @@ def _result(sub=None):
 def mock_db():
     db = AsyncMock()
     db.commit = AsyncMock()
+    db.add = MagicMock()  # SQLAlchemy add() es síncrono, no una corutina
     db.execute.return_value = _result()
     return db
 

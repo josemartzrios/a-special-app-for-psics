@@ -15,6 +15,14 @@ from unittest.mock import MagicMock
 sys.modules["fastembed"] = MagicMock()
 sys.modules["py_rust_stemmers"] = MagicMock()
 
+# init_db() abre una conexión real a Postgres en el startup de la app. Lo
+# neutralizamos globalmente para que cualquier test que dispare el lifespan
+# (with TestClient(app) as ...) nunca toque la DB, sin importar el orden de
+# import del singleton `app`. conftest se carga antes que cualquier test, así
+# que `from database import init_db` dentro de main ya recibe este mock.
+import database as _database
+_database.init_db = AsyncMock()
+
 
 # ---------------------------------------------------------------------------
 # Common data fixtures
