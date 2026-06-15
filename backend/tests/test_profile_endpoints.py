@@ -1,3 +1,4 @@
+import json
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -231,3 +232,59 @@ def test_billing_status_active_includes_payment_method():
     assert data["status"] == "active"
     assert data["payment_method"]["brand"] == "visa"
     assert data["payment_method"]["last4"] == "4242"
+
+
+def test_webhook_setup_intent_succeeded_sets_default_pm():
+    event_payload = {
+        "id": "evt_test_setup_intent_001",
+        "type": "setup_intent.succeeded",
+        "data": {
+            "object": {
+                "id": "seti_test",
+                "payment_method": "pm_test_4242",
+                "customer": "cus_test123",
+            }
+        },
+    }
+
+    mock_event = MagicMock()
+    mock_event.id = "evt_test_setup_intent_001"
+    mock_event.type = "setup_intent.succeeded"
+    mock_event.data.object.payment_method = "pm_test_4242"
+    mock_event.data.object.customer = "cus_test123"
+
+    from database import get_db
+
+    async def mock_get_db():
+        mock_db = MagicMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        async def _exec(*a, **kw): return mock_result
+        mock_db.execute = _exec
+        mock_db.add = MagicMock()
+        async def _commit(): pass
+        mock_db.commit = _commit
+        yield mock_db
+
+    app.dependency_overrides[get_db] = mock_get_db
+
+    with patch("api.billing.settings.STRIPE_WEBHOOK_SECRET", "whsec_test"), \
+         patch("api.billing.stripe.Webhook.construct_event", return_value=mock_event), \
+         patch("api.billing.stripe.PaymentMethod.attach") as mock_attach, \
+         patch("api.billing.stripe.Customer.modify") as mock_modify:
+
+        with TestClient(app) as client:
+            resp = client.post(
+                "/api/v1/billing/webhook",
+                content=json.dumps(event_payload),
+                headers={"stripe-signature": "test_sig"},
+            )
+
+    app.dependency_overrides.clear()
+
+    assert resp.status_code == 200
+    mock_attach.assert_called_once_with("pm_test_4242", customer="cus_test123")
+    mock_modify.assert_called_once_with(
+        "cus_test123",
+        invoice_settings={"default_payment_method": "pm_test_4242"},
+    )

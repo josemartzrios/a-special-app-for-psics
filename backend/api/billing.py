@@ -15,66 +15,96 @@ logger = logging.getLogger("syquex.billing")
 router = APIRouter()
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
+
+# ---------------------------------------------------------------------------
+# Data access (Repository) — query reutilizable por todos los endpoints
+# ---------------------------------------------------------------------------
+
+async def _get_subscription(psychologist_id, db: AsyncSession) -> Subscription | None:
+    result = await db.execute(
+        select(Subscription).where(Subscription.psychologist_id == psychologist_id)
+    )
+    return result.scalar_one_or_none()
+
+
+async def _get_subscription_by_stripe_id(stripe_subscription_id: str, db: AsyncSession) -> Subscription | None:
+    result = await db.execute(
+        select(Subscription).where(Subscription.stripe_subscription_id == stripe_subscription_id)
+    )
+    return result.scalar_one_or_none()
+
+
+# ---------------------------------------------------------------------------
+# Lógica de negocio (pura, testeable sin DB ni HTTP)
+# ---------------------------------------------------------------------------
+
+def _trial_days_remaining(trial_ends_at: datetime | None) -> int:
+    """Días restantes de trial, nunca negativo."""
+    if not trial_ends_at:
+        return 0
+    # trial_ends_at puede venir naive desde la DB; normalizamos a UTC aware
+    end = trial_ends_at.replace(tzinfo=timezone.utc) if trial_ends_at.tzinfo is None else trial_ends_at
+    return max(0, (end - datetime.now(timezone.utc)).days)
+
+
+def _fetch_payment_method(stripe_customer_id: str | None) -> dict | None:
+    """Tarjeta default del customer en Stripe, o None si no hay o si la llamada falla."""
+    if not stripe_customer_id:
+        return None
+    try:
+        customer = stripe.Customer.retrieve(
+            stripe_customer_id,
+            expand=["invoice_settings.default_payment_method"],
+        )
+        pm = customer.invoice_settings.default_payment_method
+        if pm and getattr(pm, "card", None):
+            return {"brand": pm.card.brand, "last4": pm.card.last4}
+    except Exception as e:
+        logger.warning("Could not fetch payment method from Stripe: %s", e)
+    return None
+
+
+def _build_billing_status(sub: Subscription | None, psychologist) -> dict:
+    """Despacha la respuesta de /status según el estado de la suscripción."""
+    if not sub:
+        # No debería pasar: la suscripción se crea en register
+        return {"status": "trialing", "days_remaining": 0}
+
+    match sub.status:
+        case "trialing":
+            return {
+                "status": "trialing",
+                "days_remaining": _trial_days_remaining(psychologist.trial_ends_at),
+            }
+        # Sub activa sin stripe_subscription_id → acceso de cortesía manual
+        case "active" if not sub.stripe_subscription_id:
+            return {"status": "courtesy"}
+        case "active":
+            return {
+                "status": "active",
+                "current_period_end": sub.current_period_end,
+                "cancel_at_period_end": sub.cancel_at_period_end,
+                "payment_method": _fetch_payment_method(psychologist.stripe_customer_id),
+            }
+        case _:
+            return {"status": sub.status, "current_period_end": sub.current_period_end}
+
+
 @router.get("/status")
 async def get_billing_status(
     psychologist = Depends(get_current_psychologist),
     db: AsyncSession = Depends(get_db)
 ):
-    result = await db.execute(
-        select(Subscription).where(Subscription.psychologist_id == psychologist.id)
-    )
-    sub = result.scalar_one_or_none()
-    
-    if not sub:
-        # Esto no debería pasar porque se crea en register
-        return {"status": "trialing", "days_remaining": 0}
-        
-    if sub.status == 'trialing':
-        trial_end = psychologist.trial_ends_at
-        if not trial_end:
-            trial_end = datetime.now(timezone.utc)
-        trial_end = trial_end.replace(tzinfo=timezone.utc) if trial_end.tzinfo is None else trial_end
-        days = (trial_end - datetime.now(timezone.utc)).days
-        return {"status": "trialing", "days_remaining": max(0, days)}
-        
-    # Sub activa sin stripe_subscription_id → acceso de cortesía manual
-    if sub.status == "active" and not sub.stripe_subscription_id:
-        return {"status": "courtesy"}
-
-    if sub.status == "active":
-        payment_method = None
-        if psychologist.stripe_customer_id:
-            try:
-                customer = stripe.Customer.retrieve(
-                    psychologist.stripe_customer_id,
-                    expand=["invoice_settings.default_payment_method"],
-                )
-                pm = customer.invoice_settings.default_payment_method
-                if pm and hasattr(pm, "card") and pm.card:
-                    payment_method = {"brand": pm.card.brand, "last4": pm.card.last4}
-            except Exception as e:
-                logger.warning("Could not fetch payment method from Stripe: %s", e)
-        return {
-            "status": "active",
-            "current_period_end": sub.current_period_end,
-            "cancel_at_period_end": sub.cancel_at_period_end,
-            "payment_method": payment_method,
-        }
-    return {
-        "status": sub.status,
-        "current_period_end": sub.current_period_end,
-    }
+    sub = await _get_subscription(psychologist.id, db)
+    return _build_billing_status(sub, psychologist)
 
 @router.post("/create-checkout")
 async def create_checkout_session(
     psychologist = Depends(get_current_psychologist),
     db: AsyncSession = Depends(get_db)
 ):
-    result = await db.execute(
-        select(Subscription).where(Subscription.psychologist_id == psychologist.id)
-    )
-    sub = result.scalar_one_or_none()
-    
+    sub = await _get_subscription(psychologist.id, db)
+
     if not sub:
         raise HTTPException(status_code=404, detail="Suscripción no encontrada")
         
@@ -95,82 +125,119 @@ async def create_checkout_session(
         logger.error("Stripe checkout error: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Error al crear sesión de pago")
 
-@router.post("/webhook")
-async def stripe_webhook(request: Request, db: AsyncSession = Depends(get_db)):
-    payload = await request.body()
-    sig_header = request.headers.get('stripe-signature')
-    webhook_secret = settings.STRIPE_WEBHOOK_SECRET
+# ---------------------------------------------------------------------------
+# Webhook — transporte + idempotencia (preocupaciones transversales)
+# ---------------------------------------------------------------------------
 
+async def _verify_stripe_event(request: Request):
+    """Lee el body, verifica la firma y devuelve el evento Stripe ya validado."""
+    webhook_secret = settings.STRIPE_WEBHOOK_SECRET
     if not webhook_secret:
         logger.error("STRIPE_WEBHOOK_SECRET not configured")
         raise HTTPException(status_code=500, detail="Error interno del servidor")
 
+    payload = await request.body()
+    sig_header = request.headers.get('stripe-signature')
     try:
-        event = stripe.Webhook.construct_event(payload, sig_header, webhook_secret)
+        return stripe.Webhook.construct_event(payload, sig_header, webhook_secret)
     except stripe.error.SignatureVerificationError:
         raise HTTPException(status_code=400, detail="Firma inválida")
     except ValueError:
         raise HTTPException(status_code=400, detail="Payload inválido")
 
-    # Idempotencia
+
+async def _is_event_processed(event_id: str, db: AsyncSession) -> bool:
+    """True si el evento ya fue procesado (idempotencia de reintentos de Stripe)."""
     result = await db.execute(
-        select(ProcessedStripeEvent).where(ProcessedStripeEvent.id == event.id)
+        select(ProcessedStripeEvent).where(ProcessedStripeEvent.id == event_id)
     )
-    if result.scalar_one_or_none():
+    return result.scalar_one_or_none() is not None
+
+
+# ---------------------------------------------------------------------------
+# Handlers por tipo de evento — reglas de negocio puras, una responsabilidad
+# c/u. Mutan la suscripción en sesión; el commit lo hace el endpoint.
+# ---------------------------------------------------------------------------
+
+async def _handle_checkout_completed(session, db: AsyncSession) -> None:
+    if session.mode != 'subscription':
+        return
+    psychologist_id = session.metadata.get('psychologist_id')
+    if not psychologist_id:
+        return
+    sub = await _get_subscription(psychologist_id, db)
+    if not sub:
+        return
+    sub.stripe_subscription_id = session.subscription
+    sub.status = 'active'
+
+
+async def _handle_invoice_payment_succeeded(invoice, db: AsyncSession) -> None:
+    if not invoice.subscription:
+        return
+    db_sub = await _get_subscription_by_stripe_id(invoice.subscription, db)
+    if not db_sub:
+        return
+    # Stripe trae el periodo actualizado en el objeto Subscription, no en el invoice
+    stripe_sub = stripe.Subscription.retrieve(invoice.subscription)
+    db_sub.status = stripe_sub.status
+    db_sub.current_period_end = datetime.fromtimestamp(stripe_sub.current_period_end, timezone.utc)
+
+
+async def _handle_invoice_payment_failed(invoice, db: AsyncSession) -> None:
+    if not invoice.subscription:
+        return
+    db_sub = await _get_subscription_by_stripe_id(invoice.subscription, db)
+    if db_sub:
+        db_sub.status = 'past_due'
+
+
+async def _handle_subscription_changed(stripe_sub, db: AsyncSession) -> None:
+    db_sub = await _get_subscription_by_stripe_id(stripe_sub.id, db)
+    if not db_sub:
+        return
+    db_sub.status = stripe_sub.status
+    db_sub.current_period_end = datetime.fromtimestamp(stripe_sub.current_period_end, timezone.utc)
+    db_sub.cancel_at_period_end = stripe_sub.cancel_at_period_end
+
+
+async def _handle_setup_intent_succeeded(si, db: AsyncSession) -> None:
+    pm_id = si.payment_method
+    customer_id = si.customer
+    if pm_id and customer_id:
+        try:
+            stripe.PaymentMethod.attach(pm_id, customer=customer_id)
+            stripe.Customer.modify(
+                customer_id,
+                invoice_settings={"default_payment_method": pm_id},
+            )
+        except Exception as e:
+            logger.error("Failed to set default payment method: %s", e, exc_info=True)
+
+
+# Dispatch table — añadir un evento = añadir una entrada, sin tocar el endpoint
+# (Open/Closed, mismo patrón que AGENT_TOOLS).
+_WEBHOOK_HANDLERS = {
+    'checkout.session.completed': _handle_checkout_completed,
+    'invoice.payment_succeeded': _handle_invoice_payment_succeeded,
+    'invoice.payment_failed': _handle_invoice_payment_failed,
+    'customer.subscription.deleted': _handle_subscription_changed,
+    'customer.subscription.updated': _handle_subscription_changed,
+    'setup_intent.succeeded': _handle_setup_intent_succeeded,
+}
+
+
+@router.post("/webhook")
+async def stripe_webhook(request: Request, db: AsyncSession = Depends(get_db)):
+    event = await _verify_stripe_event(request)
+
+    if await _is_event_processed(event.id, db):
         return {"status": "already_processed"}
-        
-    # Guardar evento
     db.add(ProcessedStripeEvent(id=event.id))
 
-    # Manejar pago exitoso
-    if event.type == 'checkout.session.completed':
-        session = event.data.object
-        if session.mode == 'subscription':
-            psychologist_id = session.metadata.get('psychologist_id')
-            if psychologist_id:
-                sub_result = await db.execute(
-                    select(Subscription).where(Subscription.psychologist_id == psychologist_id)
-                )
-                sub = sub_result.scalar_one_or_none()
-                if sub:
-                    sub.stripe_subscription_id = session.subscription
-                    sub.status = 'active'
-    
-    elif event.type == 'invoice.payment_succeeded':
-        # Actualizar fecha de fin de periodo
-        invoice = event.data.object
-        if invoice.subscription:
-            sub = stripe.Subscription.retrieve(invoice.subscription)
-            db_sub_res = await db.execute(
-                select(Subscription).where(Subscription.stripe_subscription_id == invoice.subscription)
-            )
-            db_sub = db_sub_res.scalar_one_or_none()
-            if db_sub:
-                db_sub.status = sub.status
-                db_sub.current_period_end = datetime.fromtimestamp(sub.current_period_end, timezone.utc)
-
-    elif event.type == 'invoice.payment_failed':
-        invoice = event.data.object
-        if invoice.subscription:
-            db_sub_res = await db.execute(
-                select(Subscription).where(
-                    Subscription.stripe_subscription_id == invoice.subscription
-                )
-            )
-            db_sub = db_sub_res.scalar_one_or_none()
-            if db_sub:
-                db_sub.status = 'past_due'
-
-    elif event.type in ['customer.subscription.deleted', 'customer.subscription.updated']:
-        stripe_sub = event.data.object
-        db_sub_res = await db.execute(
-            select(Subscription).where(Subscription.stripe_subscription_id == stripe_sub.id)
-        )
-        db_sub = db_sub_res.scalar_one_or_none()
-        if db_sub:
-            db_sub.status = stripe_sub.status
-            db_sub.current_period_end = datetime.fromtimestamp(stripe_sub.current_period_end, timezone.utc)
-            db_sub.cancel_at_period_end = stripe_sub.cancel_at_period_end
+    handler = _WEBHOOK_HANDLERS.get(event.type)
+    if handler:
+        await handler(event.data.object, db)
 
     await db.commit()
     return {"status": "success"}
@@ -180,10 +247,7 @@ async def cancel_subscription(
     psychologist=Depends(get_current_psychologist),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
-        select(Subscription).where(Subscription.psychologist_id == psychologist.id)
-    )
-    sub = result.scalar_one_or_none()
+    sub = await _get_subscription(psychologist.id, db)
 
     if not sub or sub.status != "active" or not sub.stripe_subscription_id:
         raise HTTPException(status_code=400, detail="No tienes una suscripción activa")
