@@ -91,6 +91,66 @@ def test_change_password_success():
     assert psych.password_hash == "hashed_new"
 
 
+def test_change_password_audit_log_has_required_entity():
+    """Regresión: el AuditLog de cambio de contraseña debe poblar `entity`
+    (NOT NULL en la tabla). El mock de db.add no valida la constraint, así que
+    inspeccionamos el objeto construido para atrapar el INSERT inválido que
+    causaba un 500 en producción."""
+    from database import AuditLog
+
+    psych = _mock_psych()
+    psych.password_hash = "hashed_old"
+    app.dependency_overrides[get_current_psychologist] = lambda: psych
+
+    added = []
+
+    async def override_get_db():
+        db = AsyncMock()
+        db.commit = AsyncMock()
+        db.add = MagicMock(side_effect=added.append)
+        yield db
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    with patch("api.auth.verify_password", return_value=True), \
+         patch("api.auth.hash_password", return_value="hashed_new"):
+        with TestClient(app) as client:
+            resp = client.post(
+                "/api/v1/auth/change-password",
+                json={"current_password": "OldPass123!", "new_password": "NewPass456!"},
+            )
+
+    app.dependency_overrides.clear()
+
+    assert resp.status_code == 204
+    audit_entries = [a for a in added if isinstance(a, AuditLog)]
+    assert len(audit_entries) == 1
+    entry = audit_entries[0]
+    assert entry.entity is not None  # NOT NULL — el bug dejaba esto en None → 500
+    assert entry.action == "password_changed"
+
+
+def test_change_password_rejects_reuse_of_current():
+    """No se permite 'cambiar' la contraseña por la misma que ya se tenía."""
+    psych = _mock_psych()
+    app.dependency_overrides[get_current_psychologist] = lambda: psych
+
+    # La contraseña actual es correcta (verify_password=True), pero la nueva
+    # es idéntica a la actual → debe rechazarse antes de tocar el hash.
+    same = "SamePass123!"
+    with patch("api.auth.verify_password", return_value=True):
+        with TestClient(app) as client:
+            resp = client.post(
+                "/api/v1/auth/change-password",
+                json={"current_password": same, "new_password": same},
+            )
+
+    app.dependency_overrides.clear()
+
+    assert resp.status_code == 400
+    assert "actual" in resp.json()["detail"].lower()
+
+
 def test_change_password_wrong_current():
     psych = _mock_psych()
     app.dependency_overrides[get_current_psychologist] = lambda: psych

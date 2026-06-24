@@ -71,6 +71,7 @@ export default function ProfileScreen() {
   }, []);
 
   const handleCardSuccess = () => {
+    setCardModalOpen(false);
     getBillingStatus().then(setBilling);
   };
 

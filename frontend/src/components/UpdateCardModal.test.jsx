@@ -90,6 +90,25 @@ describe('UpdateCardModal', () => {
     });
   });
 
+  it('estado inesperado (no succeeded) no cuelga el botón y muestra error', async () => {
+    createSetupIntent.mockResolvedValue({ client_secret: 'seti_test_secret' });
+    mockStripe.confirmSetup.mockResolvedValue({ setupIntent: { status: 'processing' } });
+
+    const onSuccess = vi.fn();
+    const user = userEvent.setup();
+    render(<UpdateCardModal open={true} onClose={() => {}} onSuccess={onSuccess} />);
+
+    await waitFor(() => screen.getByTestId('payment-element'));
+    await user.click(screen.getByRole('button', { name: /guardar/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/no se pudo confirmar/i)).toBeInTheDocument();
+    });
+    // No avanzó al éxito y el botón volvió a estar habilitado para reintentar
+    expect(onSuccess).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: /guardar tarjeta/i })).toBeEnabled();
+  });
+
   it('cierra con Escape', async () => {
     createSetupIntent.mockResolvedValue({ client_secret: 'seti_test_secret' });
     const onClose = vi.fn();

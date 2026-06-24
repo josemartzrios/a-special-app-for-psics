@@ -48,6 +48,20 @@ describe('ProfilePasswordField', () => {
     });
   });
 
+  it('rechaza el envío y muestra error cuando la confirmación no coincide', async () => {
+    const user = userEvent.setup();
+    render(<ProfilePasswordField />);
+
+    await user.click(screen.getByRole('button', { name: /editar contraseña/i }));
+    await user.type(screen.getByPlaceholderText('Contraseña actual'), 'OldPass123!');
+    await user.type(screen.getByPlaceholderText('Nueva contraseña'), 'NewPass456!');
+    await user.type(screen.getByPlaceholderText('Confirmar nueva contraseña'), 'Diferente789!');
+    await user.click(screen.getByRole('button', { name: /guardar/i }));
+
+    expect(await screen.findByText(/no coinciden/i)).toBeInTheDocument();
+    expect(changePassword).not.toHaveBeenCalled();
+  });
+
   it('contraseña actual incorrecta (400) muestra error inline, campos siguen visibles', async () => {
     const user = userEvent.setup();
     changePassword.mockRejectedValue({ status: 400, message: 'Contraseña actual incorrecta' });

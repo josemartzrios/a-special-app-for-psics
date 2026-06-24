@@ -24,8 +24,9 @@ import stripe
 
 from config import settings
 from exceptions import DomainError
-from database import get_db, Psychologist, Subscription, AuditLog, RefreshToken, PasswordResetToken
+from database import get_db, Psychologist, Subscription, RefreshToken, PasswordResetToken
 from services.password import validate_password, hash_token, hash_password, verify_password
+from api.audit import log_audit
 
 import asyncio
 import hashlib
@@ -282,13 +283,14 @@ async def register(
     db.add(subscription)
 
     # 5. Audit log
-    db.add(AuditLog(
-        psychologist_id=psychologist.id,
+    await log_audit(
+        db,
         action="register",
         entity="psychologist",
-        entity_id=str(psychologist.id),
+        entity_id=psychologist.id,
+        psychologist_id=psychologist.id,
         ip_address=request.client.host if request.client else None,
-    ))
+    )
 
     await db.commit()
 
@@ -398,13 +400,14 @@ async def logout(
         if record and record.revoked_at is None:
             psychologist_id = record.psychologist_id
             record.revoked_at = datetime.now(UTC)
-            db.add(AuditLog(
-                psychologist_id=psychologist_id,
+            await log_audit(
+                db,
                 action="logout",
                 entity="psychologist",
-                entity_id=str(psychologist_id),
+                entity_id=psychologist_id,
+                psychologist_id=psychologist_id,
                 ip_address=request.client.host if request.client else None,
-            ))
+            )
             await db.commit()
 
     response = JSONResponse(content={"ok": True})
@@ -458,13 +461,14 @@ async def forgot_password(
             ip_address=request.client.host if request.client else None,
         )
         db.add(reset_record)
-        db.add(AuditLog(
-            psychologist_id=psychologist.id,
+        await log_audit(
+            db,
             action="password_reset_requested",
             entity="psychologist",
-            entity_id=str(psychologist.id),
+            entity_id=psychologist.id,
+            psychologist_id=psychologist.id,
             ip_address=request.client.host if request.client else None,
-        ))
+        )
         await db.commit()
 
         # Fire-and-forget — never block registration if email fails
@@ -524,13 +528,14 @@ async def reset_password(
     raw_refresh, refresh_record = _create_refresh_token_record(psy.id, request)
     db.add(refresh_record)
 
-    db.add(AuditLog(
-        psychologist_id=psy.id,
+    await log_audit(
+        db,
         action="password_reset_completed",
         entity="psychologist",
-        entity_id=str(psy.id),
+        entity_id=psy.id,
+        psychologist_id=psy.id,
         ip_address=request.client.host if request.client else None,
-    ))
+    )
 
     await db.commit()
 
@@ -561,6 +566,16 @@ async def change_password(
 ):
     if not verify_password(body.current_password, psychologist.password_hash):
         raise HTTPException(status_code=400, detail="Contraseña actual incorrecta")
+    # current_password ya quedó verificada contra el hash, así que comparar en
+    # texto plano equivale a "la nueva es igual a la contraseña guardada".
+    if body.new_password == body.current_password:
+        raise HTTPException(status_code=400, detail="La nueva contraseña debe ser diferente a la actual")
     psychologist.password_hash = hash_password(body.new_password)
-    db.add(AuditLog(psychologist_id=psychologist.id, action="password_changed"))
+    await log_audit(
+        db,
+        action="password_changed",
+        entity="psychologist",
+        entity_id=psychologist.id,
+        psychologist_id=psychologist.id,
+    )
     await db.commit()

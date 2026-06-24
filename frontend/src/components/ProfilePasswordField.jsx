@@ -34,6 +34,11 @@ export default function ProfilePasswordField() {
   async function handleSave(e) {
     e.preventDefault();
     if (editState === STATES.saving) return;
+    if (next !== confirm) {
+      setErrorMsg('Las contraseñas no coinciden');
+      setEditState(STATES.error);
+      return;
+    }
     setEditState(STATES.saving);
     setErrorMsg('');
     try {

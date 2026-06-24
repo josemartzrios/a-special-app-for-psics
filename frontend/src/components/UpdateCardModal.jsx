@@ -29,9 +29,15 @@ function CardForm({ onClose, onSuccess }) {
       return;
     }
 
-    if (setupIntent.status === 'succeeded') {
+    if (setupIntent?.status === 'succeeded') {
       onSuccess();
+      return;
     }
+
+    // Estado inesperado (p. ej. 'processing', 'requires_action'): no dejar el
+    // botón colgado en "Guardando…" — reabrir para reintentar.
+    setError('No se pudo confirmar la tarjeta. Intenta de nuevo.');
+    setConfirming(false);
   };
 
   return (
@@ -88,10 +94,10 @@ export default function UpdateCardModal({ open, onClose, onSuccess }) {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
-      <div className="bg-white rounded-xl shadow-lg w-full max-w-md mx-4 overflow-hidden" role="dialog" aria-modal="true">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 overflow-y-auto p-4">
+      <div className="bg-white rounded-xl shadow-lg w-full max-w-md max-h-[90vh] flex flex-col overflow-hidden" role="dialog" aria-modal="true">
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[#18181b]/[0.06]">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[#18181b]/[0.06] flex-shrink-0">
           <h3 className="text-[15px] font-semibold text-[#18181b]">Actualizar método de pago</h3>
           <button
             onClick={() => { onClose(); reset(); }}
@@ -105,7 +111,7 @@ export default function UpdateCardModal({ open, onClose, onSuccess }) {
         </div>
 
         {/* Body */}
-        <div className="p-5">
+        <div className="p-5 overflow-y-auto">
           {loadingSecret ? (
             <div className="flex items-center justify-center py-8">
               <div role="status" className="animate-spin rounded-full h-6 w-6 border-b-2 border-[#5a9e8a]" />

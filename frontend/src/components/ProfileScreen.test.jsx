@@ -9,7 +9,11 @@ vi.mock('../api', () => ({
 }));
 
 vi.mock('./UpdateCardModal', () => ({
-  default: ({ open }) => open ? <div data-testid="update-card-modal" /> : null,
+  default: ({ open, onSuccess }) => open ? (
+    <div data-testid="update-card-modal">
+      <button onClick={onSuccess}>simular-éxito</button>
+    </div>
+  ) : null,
 }));
 
 vi.mock('./ProfilePasswordField', () => ({
@@ -75,6 +79,23 @@ describe('ProfileScreen', () => {
     await waitFor(() => screen.getByText(/Cambiar tarjeta/i));
     await user.click(screen.getByText(/Cambiar tarjeta/i));
     expect(screen.getByTestId('update-card-modal')).toBeInTheDocument();
+  });
+
+  it('cierra el modal tras éxito y refresca el billing', async () => {
+    const user = userEvent.setup();
+    render(<ProfileScreen />);
+    await waitFor(() => screen.getByText(/Cambiar tarjeta/i));
+    await user.click(screen.getByText(/Cambiar tarjeta/i));
+    expect(screen.getByTestId('update-card-modal')).toBeInTheDocument();
+
+    const callsBefore = getBillingStatus.mock.calls.length;
+    await user.click(screen.getByText('simular-éxito'));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('update-card-modal')).not.toBeInTheDocument();
+    });
+    // El éxito dispara un refresco adicional del estado de facturación
+    expect(getBillingStatus.mock.calls.length).toBe(callsBefore + 1);
   });
 
   it('no muestra botón "Cambiar tarjeta" en trial', async () => {

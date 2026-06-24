@@ -7,6 +7,7 @@ import DictationPanel from './components/DictationPanel'
 import PatientIntakeModal from './components/PatientIntakeModal'
 import EvolucionPanel from './components/EvolucionPanel'
 import { processSession, confirmNote, getTemplate, createPatient, getPatientSessions, listConversations, archivePatientSessions, getPatientProfile, setAuthCallbacks, getBillingStatus, createCheckout, logout, deleteSession, cancelSubscription, parseAvailability, createCalendarSlotsBatch } from './api'
+import { grantsAppAccess } from './utils/billing';
 import useDraft from './hooks/useDraft';
 import { getScreenFromUrl, navigateTo, refreshAccessToken, clearAccessToken, getAccessToken, setAccessToken } from './auth.js';
 import LoginScreen from './components/LoginScreen.jsx';
@@ -275,7 +276,7 @@ function App() {
     try {
       const status = await getBillingStatus();
       setBillingStatus(status);
-      if (status.status === 'trialing' || status.status === 'active') {
+      if (grantsAppAccess(status.status)) {
         setAuthScreen({ screen: 'app' });
         // Re-fetch con el token del usuario recién autenticado
         listConversations().then(setConversations).catch(() => { });
