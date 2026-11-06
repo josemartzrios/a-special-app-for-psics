@@ -1,5 +1,6 @@
 'use client'
 import FadeIn from './FadeIn'
+import { DEMO_URL } from './demo'
 
 export default function Hero() {
   return (
@@ -10,7 +11,7 @@ export default function Hero() {
         <div className="flex-1 text-center sm:text-left">
           <FadeIn>
             <div className="inline-block text-xs font-semibold text-sage bg-sage-light px-4 py-1.5 rounded-full mb-5 tracking-wide">
-              HECHO EN MÉXICO PARA PSICÓLOGOS MEXICANOS
+              HECHO EN MÉXICO · ACCESO PRIVADO POR INVITACIÓN
             </div>
           </FadeIn>
           <FadeIn delay={0.1}>
@@ -31,12 +32,14 @@ export default function Hero() {
           <FadeIn delay={0.3}>
             <div className="flex gap-4 flex-wrap items-center justify-center sm:justify-start">
               <a
-                href="https://app.syquex.mx/registro"
+                href={DEMO_URL}
+                target="_blank"
+                rel="noopener noreferrer"
                 className="text-base text-white bg-sage hover:bg-sage-dark px-8 py-3.5 rounded-xl font-semibold shadow-lg shadow-sage/30 transition-all hover:-translate-y-0.5"
               >
-                Prueba gratis — 14 días
+                Solicitar demo
               </a>
-              <span className="text-sm text-ink-tertiary">Sin tarjeta de crédito</span>
+              <span className="text-sm text-ink-tertiary">Te muestro la plataforma en vivo</span>
             </div>
           </FadeIn>
         </div>

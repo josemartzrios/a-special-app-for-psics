@@ -1,4 +1,5 @@
 import FadeIn from './FadeIn'
+import { DEMO_URL } from './demo'
 
 export default function FinalCTA() {
   return (
@@ -9,15 +10,17 @@ export default function FinalCTA() {
             Deja de documentar a mano.
           </h2>
           <p className="text-base opacity-85 mb-8 leading-relaxed">
-            Empieza hoy. Tu primera nota clínica con IA está a 45 segundos.
+            SyqueX es de uso privado. Escríbeme y te muestro cómo funciona.
           </p>
           <a
-            href="https://app.syquex.mx/registro"
+            href={DEMO_URL}
+            target="_blank"
+            rel="noopener noreferrer"
             className="block w-full sm:inline-block sm:w-auto bg-white text-sage font-semibold px-6 sm:px-10 py-3.5 rounded-xl text-sm sm:text-base hover:opacity-90 transition-opacity"
           >
-            Prueba gratis — 14 días
+            Solicitar demo
           </a>
-          <p className="text-sm opacity-70 mt-4">Sin tarjeta de crédito requerida</p>
+          <p className="text-sm opacity-70 mt-4">Acceso por invitación</p>
         </div>
       </FadeIn>
     </section>

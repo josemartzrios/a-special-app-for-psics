@@ -1,3 +1,5 @@
+import { DEMO_URL } from './demo'
+
 export default function Nav() {
   return (
     <nav className="sticky top-0 z-50 bg-white/95 backdrop-blur border-b border-ink-muted">
@@ -11,10 +13,12 @@ export default function Nav() {
             Precios
           </a>
           <a
-            href="https://app.syquex.mx/login"
+            href={DEMO_URL}
+            target="_blank"
+            rel="noopener noreferrer"
             className="text-sm font-medium text-white bg-sage hover:bg-sage-dark px-5 py-2 rounded-lg transition-colors"
           >
-            Iniciar sesión
+            Solicitar demo
           </a>
         </div>
       </div>

@@ -1,4 +1,5 @@
 import FadeIn from './FadeIn'
+import { DEMO_URL } from './demo'
 
 function CheckIcon() {
   return (
@@ -29,7 +30,7 @@ export default function Pricing() {
             Un precio simple
           </h2>
           <p className="text-center text-sm text-ink-tertiary mb-10">
-            14 días gratis. Sin tarjeta de crédito. Cancela cuando quieras.
+            Uso privado por invitación. Agenda una demo y te explico cómo empezar.
           </p>
         </FadeIn>
         <FadeIn delay={0.1}>
@@ -42,7 +43,7 @@ export default function Pricing() {
               <span className="text-5xl font-bold text-ink">$499</span>
               <span className="text-sm text-ink-tertiary">MXN/mes</span>
             </div>
-            <div className="text-xs text-ink-tertiary mb-6">Cancela cuando quieras</div>
+            <div className="text-xs text-ink-tertiary mb-6">Precio de referencia</div>
             <div className="flex flex-col gap-3 mb-8">
               {features.map((f) => (
                 <div key={f} className="flex items-center gap-2.5">
@@ -52,13 +53,15 @@ export default function Pricing() {
               ))}
             </div>
             <a
-              href="https://app.syquex.mx/registro"
+              href={DEMO_URL}
+              target="_blank"
+              rel="noopener noreferrer"
               className="block w-full text-center bg-sage hover:bg-sage-dark text-white font-semibold py-3.5 rounded-xl transition-colors text-sm shadow-lg shadow-sage/30"
             >
-              Empezar prueba gratuita — 14 días
+              Solicitar demo
             </a>
             <p className="text-xs text-ink-tertiary text-center mt-4 leading-relaxed">
-              Sin tarjeta de crédito. Puedes cancelar en cualquier momento.
+              Te muestro la plataforma en vivo por videollamada.
             </p>
           </div>
         </FadeIn>
